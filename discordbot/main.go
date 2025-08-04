@@ -60,9 +60,11 @@ func main() {
 		
 	discordSession.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {
     if i.Type == discordgo.InteractionModalSubmit && i.ModalSubmitData().CustomID == "whitelist_modal" {
-        username := i.ModalSubmitData().Components[0].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
+	username := i.ModalSubmitData().Components[0].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
+	age := i.ModalSubmitData().Components[1].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
 
-		sendWLForReview(s, username, i.Member.User.Username)
+
+		sendWLForReview(s, username, i.Member.User.Username, age)
 
         s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
             Type: discordgo.InteractionResponseChannelMessageWithSource,
@@ -77,11 +79,21 @@ func main() {
 		return
 	}
 
-	customID := i.MessageComponentData().CustomID
-if strings.HasPrefix(customID, "approve_") {
-	username := strings.TrimPrefix(customID, "approve_")
+customID := i.MessageComponentData().CustomID
 
-	fmt.Fprintf(minecraftConn, "whitelist %s\n", username)
+if strings.HasPrefix(customID, "approve_") {
+	data := strings.TrimPrefix(customID, "approve_")
+	parts := strings.SplitN(data, "|", 2)
+	if len(parts) != 2 {
+		log.Println("Invalid approve_ customID format")
+		return
+	}
+	username := parts[0]
+	requester := parts[1]
+
+	saveWLUsername(requester, username)
+
+	fmt.Fprintf(minecraftConn, "whitelist add %s\n", username)
 
 	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseUpdateMessage,

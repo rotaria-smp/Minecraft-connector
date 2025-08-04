@@ -49,6 +49,28 @@ func showWhitelistModal(s *discordgo.Session, i *discordgo.InteractionCreate) {
 						},
 					},
 				},
+				discordgo.ActionsRow{
+					Components: []discordgo.MessageComponent{
+						discordgo.TextInput{
+							CustomID:    "age",
+							Label:       "Whats your age",
+							Style:       discordgo.TextInputShort,
+							Placeholder: "16+",
+							Required:    true,
+						},
+					},
+				},
+				discordgo.ActionsRow{
+					Components: []discordgo.MessageComponent{
+						discordgo.TextInput{
+							CustomID:    "info_1",
+							Label:       "what do you plan on doing on the server?",
+							Style:       discordgo.TextInputShort,
+							Placeholder: "build, economy, towns, etc",
+							Required:    true,
+						},
+					},
+				},
 			},
 		},
 	}
@@ -56,10 +78,13 @@ func showWhitelistModal(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	s.InteractionRespond(i.Interaction, modal)
 }
 
-func sendWLForReview(s *discordgo.Session, username, requester string) {
+func sendWLForReview(s *discordgo.Session, username, requester, age string) {
 	reviewChannelID := "1401895238968021092"
 
-	content := fmt.Sprintf("📝 Whitelist request from **%s** for Minecraft username: `%s`", requester, username)
+	content := fmt.Sprintf("📝 Whitelist request from **%s** for Minecraft username: `%s` and age: %s", requester, username, age)
+
+	approveID := fmt.Sprintf("approve_%s|%s", username, requester)
+	rejectID := fmt.Sprintf("reject_%s|%s", username, requester)
 
 	components := []discordgo.MessageComponent{
 		discordgo.ActionsRow{
@@ -67,12 +92,12 @@ func sendWLForReview(s *discordgo.Session, username, requester string) {
 				discordgo.Button{
 					Label:    "Approve",
 					Style:    discordgo.SuccessButton,
-					CustomID: "approve_" + username,
+					CustomID: approveID,
 				},
 				discordgo.Button{
 					Label:    "Reject",
 					Style:    discordgo.DangerButton,
-					CustomID: "reject_" + username,
+					CustomID: rejectID,
 				},
 			},
 		},
@@ -86,3 +111,5 @@ func sendWLForReview(s *discordgo.Session, username, requester string) {
 		log.Printf("Error sending whitelist review message: %v", err)
 	}
 }
+
+
