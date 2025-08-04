@@ -11,7 +11,6 @@ public class chatHandler {
         String message = String.format("<%s> %s",
                 player.getDisplayName().getString(),
                 event.getMessage());
-        System.out.println("chathandler" + message);
         Connector.bridge.sendToDiscord(message);
     }
 }
