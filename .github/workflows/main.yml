@@ -1,0 +1,22 @@
+name: Log Testing Activity
+
+on:
+  workflow_dispatch:  # Allows manual trigger
+  push:
+    branches: [ main ]
+
+jobs:
+  log-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Log Test Activity
+        run: |
+          echo "=== TESTING PHASE STARTED ==="
+          echo "Test A: PASS"
+          echo "Test B: SKIPPED"
+          echo "Test C: PASS"
+          echo "=== TESTING PHASE COMPLETED ==="
