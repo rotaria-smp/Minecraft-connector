@@ -53,74 +53,73 @@ func main() {
 	go readMinecraftMessages()
 
 	discordSession.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {
-    if i.Type == discordgo.InteractionMessageComponent && i.MessageComponentData().CustomID == "request_whitelist" {
-        showWhitelistModal(s, i)
-    }
+		if i.Type == discordgo.InteractionMessageComponent && i.MessageComponentData().CustomID == "request_whitelist" {
+			showWhitelistModal(s, i)
+		}
 	})
-		
+
 	discordSession.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {
-    if i.Type == discordgo.InteractionModalSubmit && i.ModalSubmitData().CustomID == "whitelist_modal" {
-	username := i.ModalSubmitData().Components[0].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
-	age := i.ModalSubmitData().Components[1].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
+		if i.Type == discordgo.InteractionModalSubmit && i.ModalSubmitData().CustomID == "whitelist_modal" {
+			username := i.ModalSubmitData().Components[0].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
+			age := i.ModalSubmitData().Components[1].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
 
+			sendWLForReview(s, username, i.Member.User.ID, age)
 
-		sendWLForReview(s, username, i.Member.User.ID, age)
+			s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+				Type: discordgo.InteractionResponseChannelMessageWithSource,
+				Data: &discordgo.InteractionResponseData{
+					Content: fmt.Sprintf("✅ Thanks! We'll review your whitelist for `%s` shortly.", username),
+					Flags:   discordgo.MessageFlagsEphemeral,
+				},
+			})
+		}
+		discordSession.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {
+			if i.Type != discordgo.InteractionMessageComponent {
+				return
+			}
+			discordSession.AddHandler(func(s *discordgo.Session, m *discordgo.GuildMemberRemove) {
+				user := m.User.ID
+				log.Println("user left" + user)
+				removeFromWhitelistJson(user)
+			})
 
-        s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-            Type: discordgo.InteractionResponseChannelMessageWithSource,
-            Data: &discordgo.InteractionResponseData{
-                Content: fmt.Sprintf("✅ Thanks! We'll review your whitelist for `%s` shortly.", username),
-                Flags:   discordgo.MessageFlagsEphemeral,
-            },
-        })
-    }
-	discordSession.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	if i.Type != discordgo.InteractionMessageComponent {
-		return
-	}
-	discordSession.AddHandler(func(s *discordgo.Session, m *discordgo.GuildMemberRemove) {
-	user := m.User.ID
-	log.Println("user left" + user)
-	removeFromWhitelistJson(user)
-	})
+			customID := i.MessageComponentData().CustomID
 
-customID := i.MessageComponentData().CustomID
+			if strings.HasPrefix(customID, "approve_") {
+				data := strings.TrimPrefix(customID, "approve_")
+				parts := strings.SplitN(data, "|", 2)
+				if len(parts) != 2 {
+					log.Println("Invalid approve_ customID format")
+					return
+				}
+				username := parts[0]
+				requester := parts[1]
 
-if strings.HasPrefix(customID, "approve_") {
-	data := strings.TrimPrefix(customID, "approve_")
-	parts := strings.SplitN(data, "|", 2)
-	if len(parts) != 2 {
-		log.Println("Invalid approve_ customID format")
-		return
-	}
-	username := parts[0]
-	requester := parts[1]
+				saveWLUsername(requester, username)
 
-	saveWLUsername(requester, username)
+				fmt.Fprintf(minecraftConn, "whitelist add %s\n", username)
 
-	fmt.Fprintf(minecraftConn, "whitelist add %s\n", username)
+				s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+					Type: discordgo.InteractionResponseUpdateMessage,
+					Data: &discordgo.InteractionResponseData{
+						Content:    fmt.Sprintf("✅ Approved `%s` for whitelisting!", username),
+						Components: []discordgo.MessageComponent{},
+					},
+				})
+			} else if strings.HasPrefix(customID, "reject_") {
+				username := strings.TrimPrefix(customID, "reject_")
 
-	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-		Type: discordgo.InteractionResponseUpdateMessage,
-		Data: &discordgo.InteractionResponseData{
-			Content:    fmt.Sprintf("✅ Approved `%s` for whitelisting!", username),
-			Components: []discordgo.MessageComponent{},
-		},
-	})
-}else if strings.HasPrefix(customID, "reject_") {
-		username := strings.TrimPrefix(customID, "reject_")
-
-		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-			Type: discordgo.InteractionResponseUpdateMessage,
-			Data: &discordgo.InteractionResponseData{
-				Content: fmt.Sprintf("❌ Rejected `%s` from whitelisting.", username),
-				Components: []discordgo.MessageComponent{},
-			},
+				s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+					Type: discordgo.InteractionResponseUpdateMessage,
+					Data: &discordgo.InteractionResponseData{
+						Content:    fmt.Sprintf("❌ Rejected `%s` from whitelisting.", username),
+						Components: []discordgo.MessageComponent{},
+					},
+				})
+			}
 		})
-	}
-})
 
-})
+	})
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt)
 	<-stop
@@ -134,57 +133,57 @@ func onDiscordMessage(s *discordgo.Session, m *discordgo.MessageCreate) {
 
 	msg := fmt.Sprintf("[Discord] %s: %s", m.Author.Username, m.Content)
 
-	_, err := fmt.Fprintln(minecraftConn, msg) 
+	_, err := fmt.Fprintln(minecraftConn, msg)
 	if err != nil {
 		log.Printf("Error sending to Minecraft mod: %v", err)
 	} else {
 		log.Printf("Sent to Minecraft: %s", msg)
 	}
-	
- 	 if m.Content == "!whitelist" {
-        sendWhitelistStarter(s, m.ChannelID)
-    }
+
+	if m.Content == "!whitelist" {
+		sendWhitelistStarter(s, m.ChannelID)
+	}
 }
 
 func readMinecraftMessages() {
-    reader := bufio.NewReader(minecraftConn)
-    for {
-        message, err := reader.ReadString('\n')
-        if err != nil {
-            log.Printf("Error reading from Minecraft mod: %v", err)
-            return
-        }
-        message = strings.TrimSpace(message)
-        if message == "" {
-            continue
-        }
+	reader := bufio.NewReader(minecraftConn)
+	for {
+		message, err := reader.ReadString('\n')
+		if err != nil {
+			log.Printf("Error reading from Minecraft mod: %v", err)
+			return
+		}
+		message = strings.TrimSpace(message)
+		if message == "" {
+			continue
+		}
 
-        parts := strings.SplitN(message, " ", 2)
-        if len(parts) < 2 {
-            log.Printf("Received from Minecraft: %s", message)
-            _, err = discordSession.ChannelMessageSend(discordChannelID, message)
-            if err != nil {
-                log.Printf("Error sending message to Discord: %v", err)
-            }
-            continue
-        }
+		parts := strings.SplitN(message, " ", 2)
+		if len(parts) < 2 {
+			log.Printf("Received from Minecraft: %s", message)
+			_, err = discordSession.ChannelMessageSend(discordChannelID, message)
+			if err != nil {
+				log.Printf("Error sending message to Discord: %v", err)
+			}
+			continue
+		}
 
-        username := parts[0] 
-        content := parts[1] 
-        content = strings.TrimPrefix(content, "literal{")
-        content = strings.TrimSuffix(content, "}")
-        content = strings.TrimSpace(content)
+		username := parts[0]
+		content := parts[1]
+		content = strings.TrimPrefix(content, "literal{")
+		content = strings.TrimSuffix(content, "}")
+		content = strings.TrimSpace(content)
 
-        cleanedMessage := fmt.Sprintf("%s %s", username, content)
+		cleanedMessage := fmt.Sprintf("%s %s", username, content)
 
-        log.Printf("Received from Minecraft: %s", cleanedMessage)
-        _, err = discordSession.ChannelMessageSend(discordChannelID, cleanedMessage)
-        if err != nil {
-            log.Printf("Error sending message to Discord: %v", err)
-        }
-    }
+		log.Printf("Received from Minecraft: %s", cleanedMessage)
+		_, err = discordSession.ChannelMessageSend(discordChannelID, cleanedMessage)
+		if err != nil {
+			log.Printf("Error sending message to Discord: %v", err)
+		}
+	}
 }
 
-func removeWL(user any){
+func removeWL(user any) {
 	fmt.Fprintf(minecraftConn, "unwhitelist %s\n", user)
 }

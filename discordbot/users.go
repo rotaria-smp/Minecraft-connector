@@ -7,7 +7,7 @@ import (
 )
 
 type WhitelistEntry struct {
-	DiscordUsername  string `json:"discord_username"`
+	DiscordUsername   string `json:"discord_username"`
 	MinecraftUsername string `json:"minecraft_username"`
 }
 
@@ -24,7 +24,7 @@ func saveWLUsername(discordUsername string, minecraftUsername string) {
 
 	// Append new entry
 	entries = append(entries, WhitelistEntry{
-		DiscordUsername:  discordUsername,
+		DiscordUsername:   discordUsername,
 		MinecraftUsername: minecraftUsername,
 	})
 
@@ -60,7 +60,7 @@ func removeFromWhitelistJson(discordID any) {
 	for _, entry := range entries {
 		if entry.DiscordUsername == discordID {
 			removedMCUsername = entry.MinecraftUsername
-			continue 
+			continue
 		}
 		updated = append(updated, entry)
 	}
