@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -11,13 +10,14 @@ import (
 )
 
 func main() {
-	fmt.Println("Hello, World!")
 	err := godotenv.Load()
 	if err != nil {
 		log.Fatal("Error loading .env file")
 	}
 	session, _ := discordgo.New("Bot " + os.Getenv("dtoken"))
 	session.Identify.Intents = discordgo.IntentsGuilds | discordgo.IntentsGuildMessages
+
+	session.AddHandler(messageCreate)
 
 	err = session.Open()
 	if err != nil {
@@ -31,4 +31,8 @@ func main() {
 	signal.Notify(stop, os.Interrupt)
 	<-stop
 	log.Println("Graceful shutdown")
+}
+
+func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
+	log.Printf("%s", "New message \""+m.Content+"\" from "+m.Author.Username)
 }
