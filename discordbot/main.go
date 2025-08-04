@@ -13,9 +13,9 @@ import (
 func main() {
 	fmt.Println("Hello, World!")
 	err := godotenv.Load()
-  if err != nil {
-    log.Fatal("Error loading .env file")
-  }
+	if err != nil {
+		log.Fatal("Error loading .env file")
+	}
 	session, _ := discordgo.New("Bot " + os.Getenv("dtoken"))
 	session.Identify.Intents = discordgo.IntentsGuilds | discordgo.IntentsGuildMessages
 
