@@ -71,6 +71,9 @@ func removeFromWhitelistJson(discordID any) {
 	}
 
 	updatedData, _ := json.MarshalIndent(updated, "", "  ")
+	if len(updated) == 0 {
+		updatedData = []byte("[]") // Ensure we write an empty array if no entries remain
+	}
 	_ = os.WriteFile("whitelist.json", updatedData, 0644)
 
 	removeWL(removedMCUsername)
