@@ -52,15 +52,24 @@ public class DiscordBridge {
         try {
             String inputLine;
             while ((inputLine = in.readLine()) != null) {
-                // Broadcast messages from Discord to Minecraft
-                MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
-                if (server != null) {
-                    server.getPlayerList().broadcastSystemMessage(
-                            Component.literal("[Discord] " + inputLine), false);
+                if (inputLine.toLowerCase().startsWith("whitelist ")) {
+                    String playerName = inputLine.substring("whitelist ".length()).trim();
+                    MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
+                    if (server != null && !playerName.isEmpty()) {
+                        Connector.LOGGER.info("Adding player to whitelist: " + playerName);
+                        WhitelistHandler.addToWhitelist(server, playerName);
+                    }
+                } else {
+                    MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
+                    if (server != null) {
+                        server.getPlayerList().broadcastSystemMessage(
+                                Component.literal(inputLine), false);
+                    }
                 }
             }
         } catch (IOException e) {
             Connector.LOGGER.error("Error reading from Discord bot", e);
         }
     }
+
 }
