@@ -52,78 +52,114 @@ func main() {
 
 	go readMinecraftMessages()
 
-	discordSession.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {
-		if i.Type == discordgo.InteractionMessageComponent && i.MessageComponentData().CustomID == "request_whitelist" {
-			showWhitelistModal(s, i)
-		}
-	})
+	discordSession.AddHandler(onUserLeft)
+	discordSession.AddHandler(onWhiteListModalRequested)
+	discordSession.AddHandler(onWhitelistModalSubmitted)
+	discordSession.AddHandler(onWhitelistModalResponse)
 
-	discordSession.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {
-		if i.Type == discordgo.InteractionModalSubmit && i.ModalSubmitData().CustomID == "whitelist_modal" {
-			username := i.ModalSubmitData().Components[0].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
-			age := i.ModalSubmitData().Components[1].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
-
-			sendWLForReview(s, username, i.Member.User.ID, age)
-
-			s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-				Type: discordgo.InteractionResponseChannelMessageWithSource,
-				Data: &discordgo.InteractionResponseData{
-					Content: fmt.Sprintf("✅ Thanks! We'll review your whitelist for `%s` shortly.", username),
-					Flags:   discordgo.MessageFlagsEphemeral,
-				},
-			})
-		}
-		discordSession.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {
-			if i.Type != discordgo.InteractionMessageComponent {
-				return
-			}
-			discordSession.AddHandler(func(s *discordgo.Session, m *discordgo.GuildMemberRemove) {
-				user := m.User.ID
-				log.Println("user left" + user)
-				removeFromWhitelistJson(user)
-			})
-
-			customID := i.MessageComponentData().CustomID
-
-			if strings.HasPrefix(customID, "approve_") {
-				data := strings.TrimPrefix(customID, "approve_")
-				parts := strings.SplitN(data, "|", 2)
-				if len(parts) != 2 {
-					log.Println("Invalid approve_ customID format")
-					return
-				}
-				username := parts[0]
-				requester := parts[1]
-
-				saveWLUsername(requester, username)
-
-				fmt.Fprintf(minecraftConn, "whitelist add %s\n", username)
-
-				s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-					Type: discordgo.InteractionResponseUpdateMessage,
-					Data: &discordgo.InteractionResponseData{
-						Content:    fmt.Sprintf("✅ Approved `%s` for whitelisting!", username),
-						Components: []discordgo.MessageComponent{},
-					},
-				})
-			} else if strings.HasPrefix(customID, "reject_") {
-				username := strings.TrimPrefix(customID, "reject_")
-
-				s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-					Type: discordgo.InteractionResponseUpdateMessage,
-					Data: &discordgo.InteractionResponseData{
-						Content:    fmt.Sprintf("❌ Rejected `%s` from whitelisting.", username),
-						Components: []discordgo.MessageComponent{},
-					},
-				})
-			}
-		})
-
-	})
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt)
 	<-stop
 	log.Println("Graceful shutdown")
+}
+
+func onWhiteListModalRequested(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	if i.Type == discordgo.InteractionMessageComponent && i.MessageComponentData().CustomID == "request_whitelist" {
+		showWhitelistModal(s, i)
+	}
+}
+
+func getModalInputValue(i *discordgo.InteractionCreate, customID string) string {
+	data := i.ModalSubmitData()
+	for _, c := range data.Components {
+		if row, ok := c.(*discordgo.ActionsRow); ok {
+			for _, ic := range row.Components {
+				if input, ok := ic.(*discordgo.TextInput); ok && input.CustomID == customID {
+					return input.Value
+				}
+			}
+		}
+	}
+	return ""
+}
+
+func onWhitelistModalSubmitted(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	if i.Type == discordgo.InteractionModalSubmit && i.ModalSubmitData().CustomID == "whitelist_modal" {
+		var submittingUser *discordgo.User
+
+		if i.User != nil {
+			submittingUser = i.User
+		} else if i.Member != nil {
+			submittingUser = i.Member.User
+		} else {
+			log.Println("Could not determine submitting user")
+			return
+		}
+
+		minecraftUsername := getModalInputValue(i, "mc_username")
+		age := getModalInputValue(i, "age")
+
+		sendWLForReview(s, minecraftUsername, submittingUser.ID, age)
+
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Content: fmt.Sprintf("✅ Thanks! We'll review your whitelist for `%s` shortly.", minecraftUsername),
+				Flags:   discordgo.MessageFlagsEphemeral,
+			},
+		})
+
+		// TODO: Remove original modal message
+
+	}
+}
+
+func onWhitelistModalResponse(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	if i.Type != discordgo.InteractionMessageComponent {
+		return
+	}
+
+	customID := i.MessageComponentData().CustomID
+
+	if strings.HasPrefix(customID, "approve_") {
+		data := strings.TrimPrefix(customID, "approve_")
+		parts := strings.SplitN(data, "|", 2)
+		if len(parts) != 2 {
+			log.Println("Invalid approve_ customID format")
+			return
+		}
+		username := parts[0]
+		requester := parts[1]
+		saveWLUsername(requester, username)
+
+		fmt.Fprintf(minecraftConn, "whitelist add %s\n", username)
+
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseUpdateMessage,
+			Data: &discordgo.InteractionResponseData{
+				Content:    fmt.Sprintf("✅ Approved `%s` for whitelisting!", username),
+				Components: []discordgo.MessageComponent{},
+			},
+		})
+	} else if strings.HasPrefix(customID, "reject_") {
+		username := strings.TrimPrefix(customID, "reject_")
+
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseUpdateMessage,
+			Data: &discordgo.InteractionResponseData{
+				Content:    fmt.Sprintf("❌ Rejected `%s` from whitelisting.", username),
+				Components: []discordgo.MessageComponent{},
+			},
+		})
+	} else {
+		log.Printf("Unknown customID: %s", customID)
+	}
+}
+
+func onUserLeft(s *discordgo.Session, m *discordgo.GuildMemberRemove) {
+	user := m.User.ID
+	log.Println("user left" + user)
+	removeFromWhitelistJson(user)
 }
 
 func onDiscordMessage(s *discordgo.Session, m *discordgo.MessageCreate) {
