@@ -3,6 +3,7 @@ java/connector/.gradle
 java/connector/.idea
 java/connector/build
 
+*.json
 .env
 rotaria-bot
 rotaria-bot.exe

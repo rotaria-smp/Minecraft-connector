@@ -39,7 +39,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to create Discord session: %v", err)
 	}
-	discordSession.Identify.Intents = discordgo.IntentsGuilds | discordgo.IntentsGuildMessages
+	discordSession.Identify.Intents = discordgo.IntentsGuilds | discordgo.IntentsGuildMessages | discordgo.IntentsGuildMembers
 	discordSession.AddHandler(onDiscordMessage)
 
 	err = discordSession.Open()
@@ -64,7 +64,7 @@ func main() {
 	age := i.ModalSubmitData().Components[1].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
 
 
-		sendWLForReview(s, username, i.Member.User.Username, age)
+		sendWLForReview(s, username, i.Member.User.ID, age)
 
         s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
             Type: discordgo.InteractionResponseChannelMessageWithSource,
@@ -78,6 +78,11 @@ func main() {
 	if i.Type != discordgo.InteractionMessageComponent {
 		return
 	}
+	discordSession.AddHandler(func(s *discordgo.Session, m *discordgo.GuildMemberRemove) {
+	user := m.User.ID
+	log.Println("user left" + user)
+	removeFromWhitelistJson(user)
+	})
 
 customID := i.MessageComponentData().CustomID
 
@@ -178,4 +183,8 @@ func readMinecraftMessages() {
             log.Printf("Error sending message to Discord: %v", err)
         }
     }
+}
+
+func removeWL(user any){
+	fmt.Fprintf(minecraftConn, "unwhitelist %s\n", user)
 }

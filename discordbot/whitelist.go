@@ -111,5 +111,3 @@ func sendWLForReview(s *discordgo.Session, username, requester, age string) {
 		log.Printf("Error sending whitelist review message: %v", err)
 	}
 }
-
-

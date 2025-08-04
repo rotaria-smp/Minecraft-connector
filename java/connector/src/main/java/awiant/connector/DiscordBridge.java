@@ -59,7 +59,14 @@ public class DiscordBridge {
                         Connector.LOGGER.info("Adding player to whitelist: " + playerName);
                         WhitelistHandler.addToWhitelist(server, playerName);
                     }
-                } else {
+                } else if (inputLine.toLowerCase().startsWith("unwhitelist ")) {
+                    String playerName = inputLine.substring("unwhitelist ".length()).trim();
+                    MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
+                    if (server != null && !playerName.isEmpty()) {
+                        Connector.LOGGER.info("Removing player from whitelist: " + playerName);
+                        WhitelistHandler.removeFromWhitelist(server, playerName);
+                    }
+                }else {
                     MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
                     if (server != null) {
                         server.getPlayerList().broadcastSystemMessage(
