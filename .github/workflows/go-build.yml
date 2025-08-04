@@ -2,24 +2,23 @@ name: Go Build
 
 on:
   push:
-    branches:
-      - main
+    paths:
+      - 'discordbot/**'
+      - '.github/workflows/go-build.yml'
   pull_request:
-    branches:
-      - main
+    paths:
+      - 'discordbot/**'
 
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v2
-
+      - uses: actions/checkout@v4
       - name: Set up Go
-        uses: actions/setup-go@v2
+        uses: actions/setup-go@v5
         with:
-          go-version: '1.18'  # Specify the Go version to use
-
+          go-version: '1.24'
       - name: Build
-        run: go build ./discordbot
+        run: |
+          cd discordbot
+          go build
