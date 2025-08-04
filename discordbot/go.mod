@@ -1,4 +1,4 @@
-module limpan/rotariadiscord
+module limpan/rotaria-bot
 
 go 1.24.5
 
