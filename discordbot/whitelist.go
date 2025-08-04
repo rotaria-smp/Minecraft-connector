@@ -78,13 +78,13 @@ func showWhitelistModal(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	s.InteractionRespond(i.Interaction, modal)
 }
 
-func sendWLForReview(s *discordgo.Session, username, requester, age string) {
-	reviewChannelID := "1401895238968021092"
+func sendWLForReview(s *discordgo.Session, mcUsername, discordId, age string) {
+	reviewChannelID := "1401895238968021092" // Todo fix
 
-	content := fmt.Sprintf("📝 Whitelist request from **%s** for Minecraft username: `%s` and age: %s", requester, username, age)
+	content := fmt.Sprintf("📝 Whitelist request from **<@%s>** for Minecraft username: `%s` and age: %s", discordId, mcUsername, age)
 
-	approveID := fmt.Sprintf("approve_%s|%s", username, requester)
-	rejectID := fmt.Sprintf("reject_%s|%s", username, requester)
+	approveID := fmt.Sprintf("approve_%s|%s", mcUsername, discordId)
+	rejectID := fmt.Sprintf("reject_%s|%s", mcUsername, discordId)
 
 	components := []discordgo.MessageComponent{
 		discordgo.ActionsRow{
