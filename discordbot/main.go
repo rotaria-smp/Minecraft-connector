@@ -19,48 +19,60 @@ var (
 	discordChannelID string
 )
 
-func main() {
-	err := godotenv.Load()
-	if err != nil {
-		log.Fatal("Error loading .env file")
+func init() {
+	var discordSessionErr error
+	var envErr error
+	var minecraftTcpErr error
+
+	envErr = godotenv.Load()
+	if envErr != nil {
+		log.Fatalf("Error loading .env file")
 	}
 
-	discordToken := os.Getenv("dtoken")
 	discordChannelID = os.Getenv("channelid")
 
-	minecraftConn, err = net.Dial("tcp", "localhost:26644")
-	if err != nil {
-		log.Fatalf("Failed to connect to Minecraft mod socket: %v", err)
+	discordSession, discordSessionErr = discordgo.New("Bot " + os.Getenv("dtoken"))
+	if discordSessionErr != nil {
+		log.Fatalf("Invalid bot parameters: %v", discordSessionErr)
 	}
+
+	minecraftConn, minecraftTcpErr = net.Dial("tcp", "localhost:26644")
+	if minecraftTcpErr != nil {
+		log.Fatalf("Failed to connect to Minecraft mod socket: %v", minecraftTcpErr)
+	}
+
 	log.Println("Connected to Minecraft mod socket on localhost:26644")
-	defer minecraftConn.Close()
+}
 
-	discordSession, err = discordgo.New("Bot " + discordToken)
-	if err != nil {
-		log.Fatalf("Failed to create Discord session: %v", err)
-	}
+func main() {
 	discordSession.Identify.Intents = discordgo.IntentsGuilds | discordgo.IntentsGuildMessages | discordgo.IntentsGuildMembers
-	discordSession.AddHandler(onDiscordMessage)
 
-	err = discordSession.Open()
-	if err != nil {
-		log.Fatalf("Cannot open the Discord session: %v", err)
+	sessionOpenError := discordSession.Open()
+	if sessionOpenError != nil {
+		log.Fatalf("Cannot open the Discord session: %v", sessionOpenError)
 	}
-	defer discordSession.Close()
-
-	log.Println("Bot is now running. Press CTRL+C to exit.")
 
 	go readMinecraftMessages()
 
+	discordSession.AddHandler(onDiscordMessage)
 	discordSession.AddHandler(onUserLeft)
 	discordSession.AddHandler(onWhiteListModalRequested)
 	discordSession.AddHandler(onWhitelistModalSubmitted)
 	discordSession.AddHandler(onWhitelistModalResponse)
 
+	discordSession.AddHandler(func(s *discordgo.Session, r *discordgo.Ready) {
+		log.Printf("Logged in as: %v#%v", s.State.User.Username, s.State.User.Discriminator)
+		log.Println("Bot is now running. Press CTRL+C to exit.")
+	})
+
+	defer discordSession.Close()
+	defer minecraftConn.Close()
+
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt)
 	<-stop
-	log.Println("Graceful shutdown")
+
+	log.Println("Gracefully shutting down.")
 }
 
 func onWhiteListModalRequested(s *discordgo.Session, i *discordgo.InteractionCreate) {
@@ -255,5 +267,10 @@ func updateVoiceChannelName(channelID, status string) {
 }
 
 func removeWL(user any) {
+	if minecraftConn == nil {
+		log.Println("Minecraft connection is not established. I will not remove the user from the whitelist")
+		return
+	}
+
 	fmt.Fprintf(minecraftConn, "unwhitelist %s\n", user)
 }
