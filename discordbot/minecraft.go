@@ -55,7 +55,7 @@ func (a *App) readMinecraftMessages() {
 		cleanedMessage := fmt.Sprintf("%s %s", username, content)
 
 		log.Printf("Received from Minecraft: %s", cleanedMessage)
-		_, err = discordSession.ChannelMessageSend(discordChannelID, cleanedMessage)
+		_, err = discordSession.ChannelMessageSend(a.config.MinecraftDiscordMessengerChannelID, cleanedMessage)
 		if err != nil {
 			log.Printf("Error sending message to Discord: %v", err)
 		}
