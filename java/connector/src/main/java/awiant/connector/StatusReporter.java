@@ -39,6 +39,7 @@ public class StatusReporter {
                 .map(p -> p.getGameProfile().getName())
                 .collect(Collectors.joining(", "));
 
+//        ServerStatus status = new ServerStatus((float)tps, playerCount);
         String statusMessage = String.format("[UPDATE] TPS: %.2f | Online: %d", tps, playerCount);
 
         if (Connector.bridge != null) {

@@ -42,6 +42,7 @@ public class DiscordBridge {
         }).start();
     }
 
+    // TODO: denna borde skicka till binärdata och inte strängar hit och dit
     public void sendToDiscord(String message) {
         if (out != null) {
             out.println(message);
