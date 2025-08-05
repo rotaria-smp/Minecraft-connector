@@ -17,7 +17,7 @@ public class WhitelistHandler {
 
         GameProfile profile = server.getProfileCache().get(playerName).orElse(null);
 
-        if (profile != null) {
+        if (profile != null && profile.getId() != null) {
             whitelist.add(new UserWhiteListEntry(profile));
             try {
                 whitelist.save();
@@ -26,16 +26,21 @@ public class WhitelistHandler {
             }
         } else {
             CompletableFuture.runAsync(() -> {
-                GameProfile fetchedProfile = server.getSessionService().fillProfileProperties(new GameProfile(null, playerName), true);
-                if (fetchedProfile != null) {
+                GameProfile fetchedProfile = server.getSessionService()
+                        .fillProfileProperties(new GameProfile(null, playerName), true);
+
+                if (fetchedProfile != null && fetchedProfile.getId() != null) {
                     server.execute(() -> {
                         whitelist.add(new UserWhiteListEntry(fetchedProfile));
                         try {
                             whitelist.save();
+                            Connector.LOGGER.info("Added " + playerName + " to whitelist (Mojang lookup)");
                         } catch (Exception e) {
-                            e.printStackTrace();
+                            Connector.LOGGER.error("Could not save whitelist after adding " + playerName, e);
                         }
                     });
+                } else {
+                    Connector.LOGGER.warn("Could not resolve UUID for player '" + playerName + "'. Skipping whitelist add.");
                 }
             });
         }

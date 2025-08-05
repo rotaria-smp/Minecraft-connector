@@ -53,7 +53,7 @@ public class DiscordBridge {
             String inputLine;
             while ((inputLine = in.readLine()) != null) {
                 if (inputLine.toLowerCase().startsWith("whitelist ")) {
-                    String playerName = inputLine.substring("whitelist ".length()).trim();
+                    String playerName = inputLine.substring("whitelist add".length()).trim();
                     MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
                     if (server != null && !playerName.isEmpty()) {
                         Connector.LOGGER.info("Adding player to whitelist: " + playerName);
