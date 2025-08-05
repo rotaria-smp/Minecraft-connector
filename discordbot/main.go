@@ -31,12 +31,6 @@ type App struct {
 	// minecraftServerStatus MinecraftServerStatus // TODO: add this, easier to manage and formatting is nice :D
 }
 
-var (
-	minecraftConn    net.Conn
-	discordSession   *discordgo.Session
-	discordChannelID string
-)
-
 func main() {
 	app := &App{}
 
@@ -116,7 +110,7 @@ func (a *App) setupDiscordHandlers() {
 	a.discordSession.AddHandler(a.onDiscordMessage)
 	a.discordSession.AddHandler(a.onWhitelistModalSubmitted)
 	a.discordSession.AddHandler(a.onWhitelistModalResponse)
-	a.discordSession.AddHandler(onUserLeft)
+	a.discordSession.AddHandler(a.onUserLeft)
 	a.discordSession.AddHandler(onWhitelistModalRequested)
 }
 
@@ -129,10 +123,10 @@ func (a *App) shutdown() {
 	}
 }
 
-func onUserLeft(s *discordgo.Session, m *discordgo.GuildMemberRemove) {
+func (a *App) onUserLeft(s *discordgo.Session, m *discordgo.GuildMemberRemove) {
 	user := m.User.ID
 	log.Println("user left" + user)
-	removeFromWhitelistJson(user)
+	a.removeFromWhitelistJson(user)
 }
 
 func (a *App) onDiscordMessage(s *discordgo.Session, m *discordgo.MessageCreate) {

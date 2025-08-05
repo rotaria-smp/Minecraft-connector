@@ -39,7 +39,7 @@ func (a *App) readMinecraftMessages() {
 		parts := strings.SplitN(message, " ", 2)
 		if len(parts) < 2 {
 			log.Printf("Received from Minecraft: %s", message)
-			_, err = discordSession.ChannelMessageSend(a.config.MinecraftDiscordMessengerChannelID, message)
+			_, err = a.discordSession.ChannelMessageSend(a.config.MinecraftDiscordMessengerChannelID, message)
 			if err != nil {
 				log.Printf("Error sending message to Discord: %v", err)
 			}
@@ -55,7 +55,7 @@ func (a *App) readMinecraftMessages() {
 		cleanedMessage := fmt.Sprintf("%s %s", username, content)
 
 		log.Printf("Received from Minecraft: %s", cleanedMessage)
-		_, err = discordSession.ChannelMessageSend(a.config.MinecraftDiscordMessengerChannelID, cleanedMessage)
+		_, err = a.discordSession.ChannelMessageSend(a.config.MinecraftDiscordMessengerChannelID, cleanedMessage)
 		if err != nil {
 			log.Printf("Error sending message to Discord: %v", err)
 		}
