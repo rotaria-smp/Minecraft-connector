@@ -107,7 +107,7 @@ func (a *App) sendWLForReview(s *discordgo.Session, mcUsername, discordId, age s
 		},
 	}
 
-	_, err = s.ChannelMessageSendComplex(a.config.WhitelistRequestsChannelID, &discordgo.MessageSend{
+	_, err = s.ChannelMessageSendComplex(a.Config.WhitelistRequestsChannelID, &discordgo.MessageSend{
 		Content:    content,
 		Components: components,
 	})
@@ -162,7 +162,7 @@ func (a *App) onWhitelistModalResponse(s *discordgo.Session, i *discordgo.Intera
 		requester := parts[1]
 		saveWLUsername(requester, username)
 
-		fmt.Fprintf(a.minecraftConn, "whitelist add %s\n", username)
+		fmt.Fprintf(a.MinecraftConn, "whitelist add %s\n", username)
 
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseUpdateMessage,
@@ -226,10 +226,10 @@ func (a *App) removeFromWhitelistJson(discordID any) {
 }
 
 func (a *App) removeWL(user any) {
-	if a.minecraftConn == nil {
+	if a.MinecraftConn == nil {
 		log.Println("Minecraft connection is not established. I will not remove the user from the whitelist")
 		return
 	}
 
-	fmt.Fprintf(a.minecraftConn, "unwhitelist %s\n", user)
+	fmt.Fprintf(a.MinecraftConn, "unwhitelist %s\n", user)
 }

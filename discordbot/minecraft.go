@@ -10,12 +10,12 @@ import (
 )
 
 func (a *App) readMinecraftMessages() {
-	if a.minecraftConn == nil {
+	if a.MinecraftConn == nil {
 		log.Println("Minecraft connection is not established. I will not read messages")
 		return
 	}
 
-	reader := bufio.NewReader(a.minecraftConn)
+	reader := bufio.NewReader(a.MinecraftConn)
 	for {
 		message, err := reader.ReadString('\n')
 		if err != nil {
@@ -32,14 +32,14 @@ func (a *App) readMinecraftMessages() {
 			log.Println("Status updated:", latestStatus)
 
 			a.updateBotPresence(latestStatus)
-			a.setVoiceChannelStatus(a.config.ServerStatusChannelID, latestStatus) // todo add to env
+			a.setVoiceChannelStatus(a.Config.ServerStatusChannelID, latestStatus) // todo add to env
 			continue
 		}
 
 		parts := strings.SplitN(message, " ", 2)
 		if len(parts) < 2 {
 			log.Printf("Received from Minecraft: %s", message)
-			_, err = a.discordSession.ChannelMessageSend(a.config.MinecraftDiscordMessengerChannelID, message)
+			_, err = a.DiscordSession.ChannelMessageSend(a.Config.MinecraftDiscordMessengerChannelID, message)
 			if err != nil {
 				log.Printf("Error sending message to Discord: %v", err)
 			}
@@ -55,7 +55,7 @@ func (a *App) readMinecraftMessages() {
 		cleanedMessage := fmt.Sprintf("%s %s", username, content)
 
 		log.Printf("Received from Minecraft: %s", cleanedMessage)
-		_, err = a.discordSession.ChannelMessageSend(a.config.MinecraftDiscordMessengerChannelID, cleanedMessage)
+		_, err = a.DiscordSession.ChannelMessageSend(a.Config.MinecraftDiscordMessengerChannelID, cleanedMessage)
 		if err != nil {
 			log.Printf("Error sending message to Discord: %v", err)
 		}
@@ -63,7 +63,7 @@ func (a *App) readMinecraftMessages() {
 }
 
 func (a *App) updateBotPresence(status string) {
-	err := a.discordSession.UpdateGameStatus(0, status)
+	err := a.DiscordSession.UpdateGameStatus(0, status)
 	if err != nil {
 		log.Printf("Failed to update bot status: %v", err)
 	}
@@ -75,7 +75,7 @@ func (a *App) setVoiceChannelStatus(channelID, status string) {
 		newName = newName[:100]
 	}
 
-	_, err := a.discordSession.ChannelEdit(channelID, &discordgo.ChannelEdit{
+	_, err := a.DiscordSession.ChannelEdit(channelID, &discordgo.ChannelEdit{
 		Name: newName,
 	})
 	if err != nil {

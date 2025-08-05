@@ -25,9 +25,9 @@ type MinecraftServerStatus struct {
 }
 
 type App struct {
-	config         Config
-	discordSession *discordgo.Session
-	minecraftConn  net.Conn
+	Config         Config
+	DiscordSession *discordgo.Session
+	MinecraftConn  net.Conn
 	// minecraftServerStatus MinecraftServerStatus // TODO: add this, easier to manage and formatting is nice :D
 }
 
@@ -60,7 +60,7 @@ func (a *App) loadConfig() error {
 		log.Fatal("Error loading .env file")
 	}
 
-	a.config = Config{
+	a.Config = Config{
 		DiscordToken:                       os.Getenv("DiscordToken"),
 		MinecraftDiscordMessengerChannelID: os.Getenv("MinecraftDiscordMessengerChannelID"),
 		WhitelistRequestsChannelID:         os.Getenv("WhitelistRequestsChannelID"),
@@ -68,7 +68,7 @@ func (a *App) loadConfig() error {
 		MinecraftAddress:                   "localhost:26644",
 	}
 
-	if a.config.DiscordToken == "" {
+	if a.Config.DiscordToken == "" {
 		return fmt.Errorf("missing required environment variables")
 	}
 
@@ -78,48 +78,48 @@ func (a *App) loadConfig() error {
 func (a *App) connectToServices() error {
 	// Connect to Discord
 	var err error
-	a.discordSession, err = discordgo.New("Bot " + a.config.DiscordToken)
+	a.DiscordSession, err = discordgo.New("Bot " + a.Config.DiscordToken)
 	if err != nil {
 		return fmt.Errorf("invalid bot parameters: %w", err)
 	}
 
-	a.discordSession.Identify.Intents = discordgo.IntentsGuilds |
+	a.DiscordSession.Identify.Intents = discordgo.IntentsGuilds |
 		discordgo.IntentsGuildMessages |
 		discordgo.IntentsGuildMembers
 
-	if err := a.discordSession.Open(); err != nil {
+	if err := a.DiscordSession.Open(); err != nil {
 		return fmt.Errorf("cannot open Discord session: %w", err)
 	}
 
 	// Connect to Minecraft server
-	a.minecraftConn, err = net.Dial("tcp", a.config.MinecraftAddress)
+	a.MinecraftConn, err = net.Dial("tcp", a.Config.MinecraftAddress)
 	if err != nil {
 		return fmt.Errorf("failed to connect to Minecraft mod socket: %w", err)
 	}
-	log.Printf("Connected to Minecraft mod socket on %s", a.config.MinecraftAddress)
+	log.Printf("Connected to Minecraft mod socket on %s", a.Config.MinecraftAddress)
 
 	return nil
 }
 
 func (a *App) setupDiscordHandlers() {
-	a.discordSession.AddHandler(func(s *discordgo.Session, r *discordgo.Ready) {
+	a.DiscordSession.AddHandler(func(s *discordgo.Session, r *discordgo.Ready) {
 		log.Printf("Logged in as: %v#%v", s.State.User.Username, s.State.User.Discriminator)
 		log.Println("Bot is now running. Press CTRL+C to exit.")
 	})
 
-	a.discordSession.AddHandler(a.onDiscordMessage)
-	a.discordSession.AddHandler(a.onWhitelistModalSubmitted)
-	a.discordSession.AddHandler(a.onWhitelistModalResponse)
-	a.discordSession.AddHandler(a.onUserLeft)
-	a.discordSession.AddHandler(onWhitelistModalRequested)
+	a.DiscordSession.AddHandler(a.onDiscordMessage)
+	a.DiscordSession.AddHandler(a.onWhitelistModalSubmitted)
+	a.DiscordSession.AddHandler(a.onWhitelistModalResponse)
+	a.DiscordSession.AddHandler(a.onUserLeft)
+	a.DiscordSession.AddHandler(onWhitelistModalRequested)
 }
 
 func (a *App) shutdown() {
-	if a.discordSession != nil {
-		a.discordSession.Close()
+	if a.DiscordSession != nil {
+		a.DiscordSession.Close()
 	}
-	if a.minecraftConn != nil {
-		a.minecraftConn.Close()
+	if a.MinecraftConn != nil {
+		a.MinecraftConn.Close()
 	}
 }
 
@@ -138,15 +138,15 @@ func (a *App) onDiscordMessage(s *discordgo.Session, m *discordgo.MessageCreate)
 		sendWhitelistStarter(s, m.ChannelID)
 	}
 
-	if m.ChannelID == a.config.MinecraftDiscordMessengerChannelID {
-		if a.minecraftConn == nil {
+	if m.ChannelID == a.Config.MinecraftDiscordMessengerChannelID {
+		if a.MinecraftConn == nil {
 			log.Printf("Minecraft connection not established cannot forward message to Minecraft mod")
 			return
 		}
 
 		msg := fmt.Sprintf("[Discord] %s: %s", m.Author.Username, m.Content)
 
-		_, err := fmt.Fprintln(a.minecraftConn, msg)
+		_, err := fmt.Fprintln(a.MinecraftConn, msg)
 		if err != nil {
 			log.Printf("Error sending to Minecraft mod: %v", err)
 		} else {
