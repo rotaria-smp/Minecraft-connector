@@ -89,21 +89,18 @@ func sendWLForReview(s *discordgo.Session, mcUsername, discordId, age string) {
 	whitelistChannelID := os.Getenv("whitelistChannelID")
 	content := fmt.Sprintf("📝 Whitelist request from **<@%s>** for Minecraft username: `%s` and age: %s", discordId, mcUsername, age)
 
-	approveID := fmt.Sprintf("approve_%s|%s", mcUsername, discordId)
-	rejectID := fmt.Sprintf("reject_%s|%s", mcUsername, discordId)
-
 	components := []discordgo.MessageComponent{
 		discordgo.ActionsRow{
 			Components: []discordgo.MessageComponent{
 				discordgo.Button{
 					Label:    "Approve",
 					Style:    discordgo.SuccessButton,
-					CustomID: approveID,
+					CustomID: fmt.Sprintf("approve_%s|%s", mcUsername, discordId),
 				},
 				discordgo.Button{
 					Label:    "Reject",
 					Style:    discordgo.DangerButton,
-					CustomID: rejectID,
+					CustomID: fmt.Sprintf("reject_%s|%s", mcUsername, discordId),
 				},
 			},
 		},
@@ -117,4 +114,3 @@ func sendWLForReview(s *discordgo.Session, mcUsername, discordId, age string) {
 		log.Printf("Error sending whitelist review message: %v", err)
 	}
 }
-
