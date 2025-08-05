@@ -30,8 +30,8 @@ public class DiscordBridge {
                 Connector.LOGGER.info("Discord bridge listening on port " + port);
 
                 clientSocket = serverSocket.accept();
-                out = new PrintWriter(clientSocket.getOutputStream(), true);
-                in = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()));
+                out = new PrintWriter(new java.io.OutputStreamWriter(clientSocket.getOutputStream(), java.nio.charset.StandardCharsets.UTF_8), true);
+                in = new BufferedReader(new InputStreamReader(clientSocket.getInputStream(), java.nio.charset.StandardCharsets.UTF_8));
 
                 // Listen for incoming messages from Discord bot
                 new Thread(this::listenForMessages).start();
