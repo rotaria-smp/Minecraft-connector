@@ -181,6 +181,8 @@ func onDiscordMessage(s *discordgo.Session, m *discordgo.MessageCreate) {
 	}
 }
 
+var latestStatus string = "TPS: ?, Online: ?"
+
 func readMinecraftMessages() {
 	reader := bufio.NewReader(minecraftConn)
 	for {
@@ -191,6 +193,15 @@ func readMinecraftMessages() {
 		}
 		message = strings.TrimSpace(message)
 		if message == "" {
+			continue
+		}
+
+		if strings.HasPrefix(message, "[UPDATE]") {
+			latestStatus = strings.TrimPrefix(message, "[UPDATE] ")
+			log.Println("Status updated:", latestStatus)
+
+			updateBotPresence(latestStatus)
+			updateVoiceChannelName("1402261523321327656", latestStatus) // todo add to env
 			continue
 		}
 
@@ -217,6 +228,27 @@ func readMinecraftMessages() {
 		if err != nil {
 			log.Printf("Error sending message to Discord: %v", err)
 		}
+	}
+}
+
+func updateBotPresence(status string) {
+	err := discordSession.UpdateGameStatus(0, status)
+	if err != nil {
+		log.Printf("Failed to update bot status: %v", err)
+	}
+}
+
+func updateVoiceChannelName(channelID, status string) {
+	newName := "🟢 " + status
+	if len(newName) > 100 {
+		newName = newName[:100]
+	}
+
+	_, err := discordSession.ChannelEdit(channelID, &discordgo.ChannelEdit{
+		Name: newName,
+	})
+	if err != nil {
+		log.Printf("Failed to update voice channel name: %v", err)
 	}
 }
 
