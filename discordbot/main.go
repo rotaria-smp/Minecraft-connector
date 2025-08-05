@@ -184,6 +184,8 @@ func onDiscordMessage(s *discordgo.Session, m *discordgo.MessageCreate) {
 var latestStatus string = "TPS: ?, Online: ?"
 
 func readMinecraftMessages() {
+	statusChannelID := os.Getenv("statusChannelID")
+
 	reader := bufio.NewReader(minecraftConn)
 	for {
 		message, err := reader.ReadString('\n')
@@ -201,7 +203,7 @@ func readMinecraftMessages() {
 			log.Println("Status updated:", latestStatus)
 
 			updateBotPresence(latestStatus)
-			updateVoiceChannelName("1402261523321327656", latestStatus) // todo add to env
+			updateVoiceChannelName(statusChannelID, latestStatus) // todo add to env
 			continue
 		}
 

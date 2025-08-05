@@ -3,8 +3,10 @@ package main
 import (
 	"fmt"
 	"log"
+	"os"
 
 	"github.com/bwmarrin/discordgo"
+	"github.com/joho/godotenv"
 )
 
 func sendWhitelistStarter(s *discordgo.Session, channelID string) {
@@ -79,8 +81,12 @@ func showWhitelistModal(s *discordgo.Session, i *discordgo.InteractionCreate) {
 }
 
 func sendWLForReview(s *discordgo.Session, mcUsername, discordId, age string) {
-	reviewChannelID := "1401895238968021092" // Todo fix
+	err := godotenv.Load()
+	if err != nil {
+		log.Fatal("Error loading .env file")
+	}
 
+	whitelistChannelID := os.Getenv("whitelistChannelID")
 	content := fmt.Sprintf("📝 Whitelist request from **<@%s>** for Minecraft username: `%s` and age: %s", discordId, mcUsername, age)
 
 	approveID := fmt.Sprintf("approve_%s|%s", mcUsername, discordId)
@@ -103,7 +109,7 @@ func sendWLForReview(s *discordgo.Session, mcUsername, discordId, age string) {
 		},
 	}
 
-	_, err := s.ChannelMessageSendComplex(reviewChannelID, &discordgo.MessageSend{
+	_, err = s.ChannelMessageSendComplex(whitelistChannelID, &discordgo.MessageSend{
 		Content:    content,
 		Components: components,
 	})
@@ -111,3 +117,4 @@ func sendWLForReview(s *discordgo.Session, mcUsername, discordId, age string) {
 		log.Printf("Error sending whitelist review message: %v", err)
 	}
 }
+
