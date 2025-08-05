@@ -82,13 +82,12 @@ func showWhitelistModal(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	s.InteractionRespond(i.Interaction, modal)
 }
 
-func sendWLForReview(s *discordgo.Session, mcUsername, discordId, age string) {
+func (a *App) sendWLForReview(s *discordgo.Session, mcUsername, discordId, age string) {
 	err := godotenv.Load()
 	if err != nil {
 		log.Fatal("Error loading .env file")
 	}
 
-	whitelistChannelID := os.Getenv("whitelistChannelID")
 	content := fmt.Sprintf("📝 Whitelist request from **<@%s>** for Minecraft username: `%s` and age: %s", discordId, mcUsername, age)
 
 	components := []discordgo.MessageComponent{
@@ -108,7 +107,7 @@ func sendWLForReview(s *discordgo.Session, mcUsername, discordId, age string) {
 		},
 	}
 
-	_, err = s.ChannelMessageSendComplex(whitelistChannelID, &discordgo.MessageSend{
+	_, err = s.ChannelMessageSendComplex(a.config.WhitelistRequestsChannelID, &discordgo.MessageSend{
 		Content:    content,
 		Components: components,
 	})
@@ -123,23 +122,14 @@ func onWhitelistModalRequested(s *discordgo.Session, i *discordgo.InteractionCre
 	}
 }
 
-func onWhitelistModalSubmitted(s *discordgo.Session, i *discordgo.InteractionCreate) {
+func (a *App) onWhitelistModalSubmitted(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	if i.Type == discordgo.InteractionModalSubmit && i.ModalSubmitData().CustomID == "whitelist_modal" {
-		var submittingUser *discordgo.User
-
-		if i.User != nil {
-			submittingUser = i.User
-		} else if i.Member != nil {
-			submittingUser = i.Member.User
-		} else {
-			log.Println("Could not determine submitting user")
-			return
-		}
+		submittingUser := getSubmittingUser(i)
 
 		minecraftUsername := getModalInputValue(i, "mc_username")
 		age := getModalInputValue(i, "age")
 
-		sendWLForReview(s, minecraftUsername, submittingUser.ID, age)
+		a.sendWLForReview(s, minecraftUsername, submittingUser.ID, age)
 
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
@@ -154,7 +144,7 @@ func onWhitelistModalSubmitted(s *discordgo.Session, i *discordgo.InteractionCre
 	}
 }
 
-func onWhitelistModalResponse(s *discordgo.Session, i *discordgo.InteractionCreate) {
+func (a *App) onWhitelistModalResponse(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	if i.Type != discordgo.InteractionMessageComponent {
 		return
 	}
@@ -172,7 +162,7 @@ func onWhitelistModalResponse(s *discordgo.Session, i *discordgo.InteractionCrea
 		requester := parts[1]
 		saveWLUsername(requester, username)
 
-		fmt.Fprintf(minecraftConn, "whitelist add %s\n", username)
+		fmt.Fprintf(a.minecraftConn, "whitelist add %s\n", username)
 
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseUpdateMessage,
