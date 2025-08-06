@@ -2,6 +2,7 @@ package main
 
 import (
 	"database/sql"
+	"fmt"
 	"log"
 
 	_ "modernc.org/sqlite"
@@ -41,7 +42,16 @@ func (a *App) AddWhitelistDatabaseEntry(whitelistEntry WhiteListEntry) error {
 	if a.DatabaseConn == nil {
 		return sql.ErrConnDone
 	}
-	_, err := a.DatabaseConn.Exec(`INSERT INTO whitelist (discord_id, minecraft_username) VALUES (?, ?)`, whitelistEntry.DiscordID, whitelistEntry.MinecraftUsername)
+
+	alreadyExists, err := a.GetWhitelistEntry(whitelistEntry.DiscordID) // Ensure the entry doesn't already exist
+	if err != nil {
+		return fmt.Errorf("error checking existing whitelist entry: %v", err)
+	}
+	if alreadyExists != nil {
+		return fmt.Errorf("whitelist entry already exists for Discord ID %s", whitelistEntry.DiscordID)
+	}
+
+	_, err = a.DatabaseConn.Exec(`INSERT INTO whitelist (discord_id, minecraft_username) VALUES (?, ?)`, whitelistEntry.DiscordID, whitelistEntry.MinecraftUsername)
 	return err
 }
 
