@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	"fmt"
 	"log"
 	"net"
@@ -17,6 +18,7 @@ type Config struct {
 	WhitelistRequestsChannelID         string
 	MinecraftDiscordMessengerChannelID string
 	ServerStatusChannelID              string
+	DatabaseConfigPath                 string
 }
 
 type MinecraftServerStatus struct {
@@ -28,6 +30,7 @@ type App struct {
 	Config         Config
 	DiscordSession *discordgo.Session
 	MinecraftConn  net.Conn
+	DatabaseConn   *sql.DB
 	// minecraftServerStatus MinecraftServerStatus // TODO: add this, easier to manage and formatting is nice :D
 }
 
@@ -66,6 +69,7 @@ func (a *App) loadConfig() error {
 		WhitelistRequestsChannelID:         os.Getenv("WhitelistRequestsChannelID"),
 		ServerStatusChannelID:              os.Getenv("ServerStatusChannelID"),
 		MinecraftAddress:                   "localhost:26644",
+		DatabaseConfigPath:                 os.Getenv("DatabaseConfigPath"),
 	}
 
 	if a.Config.DiscordToken == "" {
@@ -90,6 +94,8 @@ func (a *App) connectToServices() error {
 	if err := a.DiscordSession.Open(); err != nil {
 		return fmt.Errorf("cannot open Discord session: %w", err)
 	}
+
+	a.InitializeDatabase()
 
 	// Connect to Minecraft server
 	a.MinecraftConn, err = net.Dial("tcp", a.Config.MinecraftAddress)
@@ -121,12 +127,15 @@ func (a *App) shutdown() {
 	if a.MinecraftConn != nil {
 		a.MinecraftConn.Close()
 	}
+	if a.DatabaseConn != nil {
+		a.CloseDatabase()
+	}
 }
 
 func (a *App) onUserLeft(s *discordgo.Session, m *discordgo.GuildMemberRemove) {
 	user := m.User.ID
 	log.Println("user left" + user)
-	a.removeFromWhitelistJson(user)
+	a.removeWhitelist(user)
 }
 
 func (a *App) onDiscordMessage(s *discordgo.Session, m *discordgo.MessageCreate) {

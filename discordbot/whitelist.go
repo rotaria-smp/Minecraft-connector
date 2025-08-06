@@ -1,10 +1,8 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"log"
-	"os"
 	"strings"
 
 	"github.com/bwmarrin/discordgo"
@@ -160,7 +158,7 @@ func (a *App) onWhitelistModalResponse(s *discordgo.Session, i *discordgo.Intera
 		}
 		username := parts[0]
 		requester := parts[1]
-		saveWLUsername(requester, username)
+		a.addWhitelist(requester, username)
 
 		fmt.Fprintf(a.MinecraftConn, "whitelist add %s\n", username)
 
@@ -186,50 +184,51 @@ func (a *App) onWhitelistModalResponse(s *discordgo.Session, i *discordgo.Intera
 	}
 }
 
-func (a *App) removeFromWhitelistJson(discordID any) {
-	file, err := os.ReadFile(whitelistFile)
+func (a *App) addWhitelist(discordId, minecraftUsername string) {
+	whitelistEntry := WhiteListEntry{
+		DiscordID:         discordId,
+		MinecraftUsername: minecraftUsername,
+	}
+
+	err := a.AddWhitelistDatabaseEntry(whitelistEntry)
 	if err != nil {
-		log.Println("Error reading whitelist.json:", err)
+		log.Printf("Error adding whitelist entry for Discord ID %s: %v", discordId, err)
 		return
 	}
 
-	var entries []WhitelistEntry
-	err = json.Unmarshal(file, &entries)
-	if err != nil {
-		log.Println("Error parsing JSON:", err)
+	if a.MinecraftConn == nil {
+		log.Println("Minecraft connection is not established. I will not add the user to the whitelist")
 		return
 	}
 
-	var updated []WhitelistEntry
-	var removedMCUsername string
-	for _, entry := range entries {
-		if entry.DiscordUsername == discordID {
-			removedMCUsername = entry.MinecraftUsername
-			continue
-		}
-		updated = append(updated, entry)
-	}
+	fmt.Fprintf(a.MinecraftConn, "whitelist add %s\n", minecraftUsername)
 
-	if removedMCUsername == "" {
-		log.Printf("No whitelist entry found for Discord ID %s", discordID)
-		return
-	}
-
-	updatedData, _ := json.MarshalIndent(updated, "", "  ")
-	if len(updated) == 0 {
-		updatedData = []byte("[]") // Ensure we write an empty array if no entries remain
-	}
-	_ = os.WriteFile("whitelist.json", updatedData, 0644)
-
-	a.removeWL(removedMCUsername)
-	log.Printf("Removed %s from whitelist (Discord ID: %s)", removedMCUsername, discordID)
+	log.Printf("Added %s to whitelist (Discord ID: %s)", minecraftUsername, discordId)
 }
 
-func (a *App) removeWL(user any) {
+func (a *App) removeWhitelist(discordId string) {
+	whitelistEntry, err := a.GetWhitelistEntry(discordId)
+	if err != nil {
+		log.Printf("Error retrieving whitelist entry for Discord ID %s: %v", discordId)
+		return
+	}
+	if whitelistEntry == nil {
+		log.Printf("No whitelist entry found for Discord ID %s", discordId)
+		return
+	}
+
 	if a.MinecraftConn == nil {
 		log.Println("Minecraft connection is not established. I will not remove the user from the whitelist")
 		return
 	}
 
-	fmt.Fprintf(a.MinecraftConn, "unwhitelist %s\n", user)
+	fmt.Fprintf(a.MinecraftConn, "unwhitelist %s\n", whitelistEntry.MinecraftUsername)
+
+	err = a.RemoveWhitelistDatabaseEntry(whitelistEntry.ID)
+	if err != nil {
+		log.Printf("Error removing whitelist entry for Discord ID %s: %v", discordId, err)
+		return
+	}
+
+	log.Printf("Removed %s from whitelist (Discord ID: %s)", whitelistEntry.MinecraftUsername, discordId)
 }
