@@ -28,8 +28,10 @@ type App struct {
 	Config         Config
 	DiscordSession *discordgo.Session
 	MinecraftConn  net.Conn
+	Commands []*discordgo.ApplicationCommand
 	// minecraftServerStatus MinecraftServerStatus // TODO: add this, easier to manage and formatting is nice :D
 }
+
 
 func main() {
 	app := &App{}
@@ -43,8 +45,14 @@ func main() {
 	}
 
 	defer app.shutdown()
-
 	app.setupDiscordHandlers()
+	commandsTest, err := app.DiscordSession.ApplicationCommands(app.DiscordSession.State.Application.ID, "")
+	if err == nil {
+		for _, v := range commandsTest {
+			log.Printf("Commands: %v Type: %v", v.Name, v.Type)
+		}
+		
+	}
 	log.Println("Have setup Discord handlers")
 	go app.readMinecraftMessages()
 
@@ -102,16 +110,23 @@ func (a *App) connectToServices() error {
 }
 
 func (a *App) setupDiscordHandlers() {
+	cmds := initCommands(a)
 	a.DiscordSession.AddHandler(func(s *discordgo.Session, r *discordgo.Ready) {
 		log.Printf("Logged in as: %v#%v", s.State.User.Username, s.State.User.Discriminator)
 		log.Println("Bot is now running. Press CTRL+C to exit.")
 	})
-
+	var err error
+	a.Commands, err = createCommands(a.DiscordSession, cmds)
+	if err != nil {
+		fmt.Println("Could not create commands")
+	}
+	//TODO gör funktion som hanterar varje commands handler funktion. Ta in s och i och kalla på handler()
 	a.DiscordSession.AddHandler(a.onDiscordMessage)
 	a.DiscordSession.AddHandler(a.onWhitelistModalSubmitted)
 	a.DiscordSession.AddHandler(a.onWhitelistModalResponse)
 	a.DiscordSession.AddHandler(a.onUserLeft)
 	a.DiscordSession.AddHandler(onWhitelistModalRequested)
+	a.DiscordSession.AddHandler(onApplicationCommand)
 }
 
 func (a *App) shutdown() {
@@ -121,6 +136,15 @@ func (a *App) shutdown() {
 	if a.MinecraftConn != nil {
 		a.MinecraftConn.Close()
 	}
+}
+func onApplicationCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	log.Printf("Jag blev kallad")
+	cmd, ok := commandHandlers[i.ApplicationCommandData().Name]
+	if !ok {
+		log.Printf("Unknown command: %s", i.ApplicationCommandData().Name)
+		return
+	}
+	cmd(s, i)
 }
 
 func (a *App) onUserLeft(s *discordgo.Session, m *discordgo.GuildMemberRemove) {
