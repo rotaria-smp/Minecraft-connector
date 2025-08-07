@@ -35,6 +35,11 @@ type App struct {
 	// minecraftServerStatus MinecraftServerStatus // TODO: add this, easier to manage and formatting is nice :D
 }
 
+// TODO: Fuck den här, vi måste lösa det på nått bättre sätt sen
+var (
+	commandHandlers = make(map[string]func(s *discordgo.Session, i *discordgo.InteractionCreate))
+)
+
 func main() {
 	app := &App{}
 
