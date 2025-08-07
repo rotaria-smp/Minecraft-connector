@@ -7,3 +7,4 @@ java/connector/build
 rotaria-bot
 rotaria-bot.exe
 whitelist.json
+*.db

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	"fmt"
 	"log"
 	"net"
@@ -17,6 +18,7 @@ type Config struct {
 	WhitelistRequestsChannelID         string
 	MinecraftDiscordMessengerChannelID string
 	ServerStatusChannelID              string
+	DatabaseConfigPath                 string
 }
 
 type MinecraftServerStatus struct {
@@ -28,10 +30,15 @@ type App struct {
 	Config         Config
 	DiscordSession *discordgo.Session
 	MinecraftConn  net.Conn
-	Commands []*discordgo.ApplicationCommand
+	DatabaseConn   *sql.DB
+	Commands       []*discordgo.ApplicationCommand
 	// minecraftServerStatus MinecraftServerStatus // TODO: add this, easier to manage and formatting is nice :D
 }
 
+// TODO: Fuck den här, vi måste lösa det på nått bättre sätt sen
+var (
+	commandHandlers = make(map[string]func(s *discordgo.Session, i *discordgo.InteractionCreate))
+)
 
 func main() {
 	app := &App{}
@@ -51,7 +58,7 @@ func main() {
 		for _, v := range commandsTest {
 			log.Printf("Commands: %v Type: %v", v.Name, v.Type)
 		}
-		
+
 	}
 	log.Println("Have setup Discord handlers")
 	go app.readMinecraftMessages()
@@ -74,6 +81,7 @@ func (a *App) loadConfig() error {
 		WhitelistRequestsChannelID:         os.Getenv("WhitelistRequestsChannelID"),
 		ServerStatusChannelID:              os.Getenv("ServerStatusChannelID"),
 		MinecraftAddress:                   "localhost:26644",
+		DatabaseConfigPath:                 os.Getenv("DatabaseConfigPath"),
 	}
 
 	if a.Config.DiscordToken == "" {
@@ -98,6 +106,8 @@ func (a *App) connectToServices() error {
 	if err := a.DiscordSession.Open(); err != nil {
 		return fmt.Errorf("cannot open Discord session: %w", err)
 	}
+
+	a.InitializeDatabase()
 
 	// Connect to Minecraft server
 	a.MinecraftConn, err = net.Dial("tcp", a.Config.MinecraftAddress)
@@ -136,8 +146,15 @@ func (a *App) shutdown() {
 	if a.MinecraftConn != nil {
 		a.MinecraftConn.Close()
 	}
+	if a.DatabaseConn != nil {
+		a.CloseDatabase()
+	}
 }
+
 func onApplicationCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	if i.Type != discordgo.InteractionApplicationCommand {
+		return
+	}
 	log.Printf("Jag blev kallad")
 	cmd, ok := commandHandlers[i.ApplicationCommandData().Name]
 	if !ok {
@@ -150,7 +167,7 @@ func onApplicationCommand(s *discordgo.Session, i *discordgo.InteractionCreate) 
 func (a *App) onUserLeft(s *discordgo.Session, m *discordgo.GuildMemberRemove) {
 	user := m.User.ID
 	log.Println("user left" + user)
-	a.removeFromWhitelistJson(user)
+	a.removeWhitelist(user)
 }
 
 func (a *App) onDiscordMessage(s *discordgo.Session, m *discordgo.MessageCreate) {
