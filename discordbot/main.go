@@ -152,6 +152,9 @@ func (a *App) shutdown() {
 }
 
 func onApplicationCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	if i.Type != discordgo.InteractionApplicationCommand {
+		return
+	}
 	log.Printf("Jag blev kallad")
 	cmd, ok := commandHandlers[i.ApplicationCommandData().Name]
 	if !ok {
