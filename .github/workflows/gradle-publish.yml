@@ -10,10 +10,13 @@ on:
 
 jobs:
   build:
-    name: Build & Test
+    name: Build & Test (Java)
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    defaults:
+      run:
+        working-directory: java/connector   # <-- run gradle from here
     steps:
       - uses: actions/checkout@v4
 
@@ -23,11 +26,11 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      # Caching + wrapper verification handled by the Gradle action
-      - name: Setup Gradle
+      - name: Setup Gradle (points to subdir)
         uses: gradle/actions/setup-gradle@af1da67850ed9a4cedd57bfd976089dd991e2582 # v4.0.0
+        with:
+          build-root-directory: java/connector   # <-- tell the action where the wrapper is
 
-      # If this run came from a tag (like a release), derive version and pass to Gradle
       - name: Derive version from tag (if present)
         if: startsWith(github.ref, 'refs/tags/')
         run: echo "VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_ENV
@@ -43,14 +46,13 @@ jobs:
       - name: Run tests
         run: ./gradlew test
 
-      # Upload JARs (or zips) from all subprojects so you can grab them from the Actions UI
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: build-outputs
+          name: connector-build-outputs
           path: |
-            **/build/libs/*.jar
-            **/build/distributions/*
+            java/connector/**/build/libs/*.jar
+            java/connector/**/build/distributions/*
           if-no-files-found: warn
 
   publish:
@@ -61,6 +63,9 @@ jobs:
       contents: read
       packages: write
     if: github.event_name == 'release'
+    defaults:
+      run:
+        working-directory: java/connector   # <-- publish from the same subdir
     steps:
       - uses: actions/checkout@v4
 
@@ -69,12 +74,13 @@ jobs:
         with:
           java-version: '17'
           distribution: 'temurin'
-          # These two help if you generate a Maven settings.xml in your build (optional)
           server-id: github
           settings-path: ${{ github.workspace }}
 
-      - name: Setup Gradle
+      - name: Setup Gradle (points to subdir)
         uses: gradle/actions/setup-gradle@af1da67850ed9a4cedd57bfd976089dd991e2582 # v4.0.0
+        with:
+          build-root-directory: java/connector
 
       - name: Derive version from release tag
         run: echo "VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_ENV
