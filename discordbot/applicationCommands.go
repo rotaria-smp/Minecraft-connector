@@ -9,15 +9,12 @@ import (
 func initCommands(a *App) []*discordgo.ApplicationCommand {
 	commands := []*discordgo.ApplicationCommand{
 		{
-			Name:    "commands",
+			Name:        "commands",
 			Description: "Show a list of available commands",
-			GuildID: "1401855308787093547",
 		},
 		{
-			Name: "whitelist",
+			Name:        "whitelist",
 			Description: "Begin whitelist application",
-			GuildID: "1401855308787093547",
-			ApplicationID: "1401583799652974674",
 		},
 	}
 
@@ -30,9 +27,8 @@ func initCommands(a *App) []*discordgo.ApplicationCommand {
 				comps += fmt.Sprintf("\n- %s\n", v.Name)
 			}
 
-
 			embed := discordgo.MessageEmbed{
-				Title: "Commands",
+				Title:       "Commands",
 				Description: comps,
 			}
 
