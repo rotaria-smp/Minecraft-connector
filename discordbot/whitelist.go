@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"limpan/rotaria-bot/namemc"
 	"log"
 	"strings"
 
@@ -127,6 +128,25 @@ func (a *App) onWhitelistModalSubmitted(s *discordgo.Session, i *discordgo.Inter
 		minecraftUsername := getModalInputValue(i, "mc_username")
 		age := getModalInputValue(i, "age")
 
+		namemcClient := namemc.New()
+
+		uuid, err := namemcClient.UsernameToUUID(minecraftUsername)
+
+		if err != nil {
+			log.Printf("Error getting UUID for Minecraft username %s: %v", minecraftUsername, err)
+			// please respond to user in discord
+			s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+				Type: discordgo.InteractionResponseChannelMessageWithSource,
+				Data: &discordgo.InteractionResponseData{
+					Content: fmt.Sprintf("❌ Wrong minecraft username idiot `%s`.", minecraftUsername),
+					Flags:   discordgo.MessageFlagsEphemeral,
+				},
+			})
+			return
+		}
+
+		log.Printf("UUID for Minecraft username %s: %s", minecraftUsername, uuid)
+
 		a.sendWLForReview(s, minecraftUsername, submittingUser.ID, age)
 
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
@@ -136,9 +156,6 @@ func (a *App) onWhitelistModalSubmitted(s *discordgo.Session, i *discordgo.Inter
 				Flags:   discordgo.MessageFlagsEphemeral,
 			},
 		})
-
-		// TODO: Remove original modal message
-
 	}
 }
 
