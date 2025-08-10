@@ -156,9 +156,6 @@ func (a *App) onWhitelistModalSubmitted(s *discordgo.Session, i *discordgo.Inter
 				Flags:   discordgo.MessageFlagsEphemeral,
 			},
 		})
-
-		// TODO: Remove original modal message
-
 	}
 }
 
