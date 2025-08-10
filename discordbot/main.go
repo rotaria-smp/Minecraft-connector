@@ -80,7 +80,7 @@ func (a *App) loadConfig() error {
 		MinecraftDiscordMessengerChannelID: os.Getenv("MinecraftDiscordMessengerChannelID"),
 		WhitelistRequestsChannelID:         os.Getenv("WhitelistRequestsChannelID"),
 		ServerStatusChannelID:              os.Getenv("ServerStatusChannelID"),
-		MinecraftAddress:                   "localhost:26644",
+		MinecraftAddress:                   os.Getenv("MinecraftAddress"),
 		DatabaseConfigPath:                 os.Getenv("DatabaseConfigPath"),
 	}
 
