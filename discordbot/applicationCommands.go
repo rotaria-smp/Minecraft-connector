@@ -9,41 +9,42 @@ import (
 func initCommands(a *App) []*discordgo.ApplicationCommand {
 	commands := []*discordgo.ApplicationCommand{
 		{
-			Name:        "hej",
-			Description: "Testing",
+			Name:    "commands",
+			Description: "Show a list of available commands",
+			GuildID: "1401855308787093547",
 		},
 		{
-			Name:    "commands",
-			Type:    2, //change to 1 when in prod
+			Name: "whitelist",
+			Description: "Begin whitelist application",
 			GuildID: "1401855308787093547",
+			ApplicationID: "1401583799652974674",
 		},
 	}
 
 	commandHandlers = map[string]func(s *discordgo.Session, i *discordgo.InteractionCreate){
-		"hej": func(s *discordgo.Session, i *discordgo.InteractionCreate) {
-			s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-				Type: discordgo.InteractionResponseChannelMessageWithSource,
-				Data: &discordgo.InteractionResponseData{
-					Content: "ehkgjjdhkfsdhjalgjdh",
-				},
-			})
-		},
 		"commands": func(s *discordgo.Session, i *discordgo.InteractionCreate) {
-			fmt.Println("hejhej")
 			cmd := a.Commands
 			var comps string
 			for _, v := range cmd {
 				fmt.Printf("%s", v.Name)
-				comps += fmt.Sprintf("- %s\n", v.Name)
+				comps += fmt.Sprintf("\n- %s\n", v.Name)
 			}
-			fmt.Println(comps)
+
+
+			embed := discordgo.MessageEmbed{
+				Title: "Commands",
+				Description: comps,
+			}
 
 			s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 				Type: discordgo.InteractionResponseChannelMessageWithSource,
 				Data: &discordgo.InteractionResponseData{
-					Content: comps,
+					Embeds: []*discordgo.MessageEmbed{&embed},
 				},
 			})
+		},
+		"whitelist": func(s *discordgo.Session, i *discordgo.InteractionCreate) {
+			showWhitelistModal(s, i)
 		},
 	}
 	return commands
@@ -82,6 +83,9 @@ func createCommands(s *discordgo.Session, unregisteredCommands []*discordgo.Appl
 	return registeredCommands, nil
 }
 
-func deleteCommand(s *discordgo.Session, commands []*discordgo.ApplicationCommandInteractionData) {
-
+func deleteCommand(s *discordgo.Session, commands []*discordgo.ApplicationCommand, app *App, toDelete string) {
+	err := s.ApplicationCommandDelete(app.DiscordSession.State.Application.ID, app.DiscordSession.State.Application.GuildID, toDelete)
+	if err != nil {
+		fmt.Println("Could not delete commands")
+	}
 }
