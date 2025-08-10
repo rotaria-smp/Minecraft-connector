@@ -1,73 +1,26 @@
-name: Gradle (Build & Publish)
+name: Build & Publish Java Connector
 
 on:
   push:
     branches: [ main ]
-  pull_request:
-    branches: [ main ]
-  release:
-    types: [created]
+    tags:     [ 'v*' ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
-  build:
-    name: Build & Test (Java)
+  build-and-maybe-publish:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
     defaults:
       run:
-        working-directory: java/connector   # <-- run gradle from here
+        working-directory: java/connector
+
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up JDK 17
-        uses: actions/setup-java@v4
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
-          java-version: '17'
-          distribution: 'temurin'
-
-      - name: Setup Gradle (points to subdir)
-        uses: gradle/actions/setup-gradle@af1da67850ed9a4cedd57bfd976089dd991e2582 # v4.0.0
-        with:
-          build-root-directory: java/connector   # <-- tell the action where the wrapper is
-
-      - name: Derive version from tag (if present)
-        if: startsWith(github.ref, 'refs/tags/')
-        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_ENV
-
-      - name: Build
-        run: |
-          if [ -n "${VERSION}" ]; then
-            ./gradlew clean build -Pversion="${VERSION}"
-          else
-            ./gradlew clean build
-          fi
-
-      - name: Run tests
-        run: ./gradlew test
-
-      - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: connector-build-outputs
-          path: |
-            java/connector/**/build/libs/*.jar
-            java/connector/**/build/distributions/*
-          if-no-files-found: warn
-
-  publish:
-    name: Publish to GitHub Packages
-    needs: build
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-    if: github.event_name == 'release'
-    defaults:
-      run:
-        working-directory: java/connector   # <-- publish from the same subdir
-    steps:
-      - uses: actions/checkout@v4
+          fetch-depth: 0    # Needed for GitVersion to see history
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -77,16 +30,59 @@ jobs:
           server-id: github
           settings-path: ${{ github.workspace }}
 
-      - name: Setup Gradle (points to subdir)
-        uses: gradle/actions/setup-gradle@af1da67850ed9a4cedd57bfd976089dd991e2582 # v4.0.0
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@af1da67850ed9a4cedd57bfd976089dd991e2582
         with:
           build-root-directory: java/connector
 
-      - name: Derive version from release tag
-        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_ENV
+      # --- GitVersion ---
+      - name: Install GitVersion
+        uses: gittools/actions/gitversion/setup@v3
+        with:
+          versionSpec: '5.x'
 
+      - name: Compute version with GitVersion
+        id: gitversion
+        uses: gittools/actions/gitversion/execute@v3
+
+      - name: Echo version
+        run: |
+          echo "semVer=${{ steps.gitversion.outputs.semVer }}"
+          echo "informational=${{ steps.gitversion.outputs.informationalVersion }}"
+
+      # Create & push tag if this isn't a tag build
+      - name: Create tag if needed
+        id: maybe_tag
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        run: |
+          TAG="v${{ steps.gitversion.outputs.semVer }}"
+          if ! git rev-parse "$TAG" >/dev/null 2>&1; then
+            git config user.name "github-actions"
+            git config user.email "github-actions@github.com"
+            git tag -a "$TAG" -m "Release $TAG"
+            git push origin "$TAG"
+            echo "did_tag=true" >> $GITHUB_OUTPUT
+          else
+            echo "did_tag=false" >> $GITHUB_OUTPUT
+          fi
+        working-directory: .  # tagging at repo root
+
+      - name: Make gradlew executable
+        run: chmod +x gradlew
+
+      - name: Build
+        env:
+          VERSION: ${{ steps.gitversion.outputs.semVer }}
+        run: ./gradlew clean build -Pversion="${VERSION}"
+
+      - name: Test
+        run: ./gradlew test
+
+      # Publish only when building a tag (either pushed or just created above)
       - name: Publish
+        if: ${{ startsWith(github.ref, 'refs/tags/') || steps.maybe_tag.outputs.did_tag == 'true' }}
         env:
           USERNAME: ${{ github.actor }}
           TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.gitversion.outputs.semVer }}
         run: ./gradlew publish -Pversion="${VERSION}"
