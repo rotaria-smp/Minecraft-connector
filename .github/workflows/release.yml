@@ -16,7 +16,7 @@ jobs:
             - name: Checkout code
               uses: actions/checkout@v4
             - name: Build
-              uses: ./.github/workflows/go-build
+              uses: ./.github/workflows/go-build.yml
             - name: Create release
               uses: actions/create-release@v1.1.4
               env: 
