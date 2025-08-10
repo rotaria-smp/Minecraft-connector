@@ -1,0 +1,24 @@
+mode: ContinuousDeployment
+branches:
+  main:
+    regex: ^main$
+    tag: next
+    increment: patch
+    prevent-increment-of-merged-branch-version: true
+    track-merge-target: false
+    is-mainline: true
+    is-release-branch: false
+  release:
+    regex: ^release[/-]
+    tag: ''
+    increment: none
+    is-release-branch: true
+    prevent-increment-of-merged-branch-version: false
+    track-merge-target: false
+ignore:
+  sha: []
+commit-message-incrementing: Enabled
+tag-prefix: 'v'
+major-version-bump-message: '\+semver:\s?(breaking|major)'
+minor-version-bump-message: '\+semver:\s?(feature|minor)'
+patch-version-bump-message: '\+semver:\s?(fix|patch)'
