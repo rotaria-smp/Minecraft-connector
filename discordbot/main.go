@@ -123,7 +123,21 @@ func (a *App) connectToServices() error {
 		return fmt.Errorf("failed to connect to Minecraft mod socket: %w", tcpbridge.ErrUnavailable)
 	}
 	log.Printf("Connected to Minecraft mod socket on %s", a.Config.MinecraftAddress)
-
+	_, events, cancel := a.MinecraftConn.Subscribe(256)
+	// TODO: handle events before merge
+	defer cancel()
+	go func() {
+		for evt := range events {
+			switch evt.Topic {
+			case "chat": // relay to a Discord channel
+			case "join": // post a join embed
+			case "leave":
+			case "status":
+			case "lifecycle":
+				log.Printf("event: %s", evt.Body)
+			}
+		}
+	}()
 	return nil
 }
 
