@@ -20,7 +20,7 @@ public class StatusReporter {
         if (event.phase != TickEvent.Phase.END) return;
 
         tickCounter++;
-        if (tickCounter >= 200) {
+        if (tickCounter >= 200) { // ~10s
             tickCounter = 0;
             reportStatus();
         }
@@ -39,11 +39,11 @@ public class StatusReporter {
                 .map(p -> p.getGameProfile().getName())
                 .collect(Collectors.joining(", "));
 
-//        ServerStatus status = new ServerStatus((float)tps, playerCount);
-        String statusMessage = String.format("[UPDATE] TPS: %.2f | Online: %d", tps, playerCount);
+        String statusMessage = String.format("[UPDATE] TPS: %.2f | Online: %d%s",
+                tps, playerCount, playerCount > 0 ? (" | Players: " + playerNames) : "");
 
         if (Connector.bridge != null) {
-            Connector.bridge.sendToDiscord(statusMessage);
+            Connector.bridge.sendEventString("status", statusMessage);
         }
     }
 }
