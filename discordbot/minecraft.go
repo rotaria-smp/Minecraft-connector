@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"fmt"
 	"log"
 	"strings"
@@ -15,14 +14,12 @@ func (a *App) readMinecraftMessages() {
 		return
 	}
 
-	reader := bufio.NewReader(a.MinecraftConn)
-	for {
-		message, err := reader.ReadString('\n')
-		if err != nil {
-			log.Printf("Error reading from Minecraft mod: %v", err)
-			return
-		}
-		message = strings.TrimSpace(message)
+	// Subscribe for events from tcpbridge
+	_, events, cancel := a.MinecraftConn.Subscribe(128)
+	defer cancel()
+
+	for evt := range events {
+		message := strings.TrimSpace(string(evt.Body))
 		if message == "" {
 			continue
 		}
@@ -30,16 +27,15 @@ func (a *App) readMinecraftMessages() {
 		if strings.HasPrefix(message, "[UPDATE]") {
 			latestStatus := strings.TrimPrefix(message, "[UPDATE] ")
 			log.Println("Status updated:", latestStatus)
-
 			a.updateBotPresence(latestStatus)
-			a.setVoiceChannelStatus(a.Config.ServerStatusChannelID, latestStatus) // todo add to env
+			a.setVoiceChannelStatus(a.Config.ServerStatusChannelID, latestStatus)
 			continue
 		}
 
 		parts := strings.SplitN(message, " ", 2)
 		if len(parts) < 2 {
 			log.Printf("Received from Minecraft: %s", message)
-			_, err = a.DiscordSession.ChannelMessageSend(a.Config.MinecraftDiscordMessengerChannelID, message)
+			_, err := a.DiscordSession.ChannelMessageSend(a.Config.MinecraftDiscordMessengerChannelID, message)
 			if err != nil {
 				log.Printf("Error sending message to Discord: %v", err)
 			}
@@ -53,9 +49,8 @@ func (a *App) readMinecraftMessages() {
 		content = strings.TrimSpace(content)
 
 		cleanedMessage := fmt.Sprintf("%s %s", username, content)
-
 		log.Printf("Received from Minecraft: %s", cleanedMessage)
-		_, err = a.DiscordSession.ChannelMessageSend(a.Config.MinecraftDiscordMessengerChannelID, cleanedMessage)
+		_, err := a.DiscordSession.ChannelMessageSend(a.Config.MinecraftDiscordMessengerChannelID, cleanedMessage)
 		if err != nil {
 			log.Printf("Error sending message to Discord: %v", err)
 		}

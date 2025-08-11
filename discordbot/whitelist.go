@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"limpan/rotaria-bot/namemc"
 	"log"
@@ -177,9 +178,14 @@ func (a *App) onWhitelistModalResponse(s *discordgo.Session, i *discordgo.Intera
 		requester := parts[1]
 		a.addWhitelist(requester, username)
 
-		fmt.Fprintf(a.MinecraftConn, "whitelist add %s\n", username)
+		msg := fmt.Sprintf("whitelist add %s\n", username)
+		ctx := context.Background()
+		_, err := a.MinecraftConn.Send(ctx, []byte(msg))
+		if err != nil {
+			log.Printf("Error sending to Minecraft mod: %v", err)
+		}
 
-		err := s.GuildMemberRoleAdd(a.Config.GuildID, requester, a.Config.MemberRoleID )
+		err = s.GuildMemberRoleAdd(a.Config.GuildID, requester, a.Config.MemberRoleID)
 		if err != nil {
 			log.Printf("Failed to assign role to %s: %v", requester, err)
 		}
@@ -241,7 +247,12 @@ func (a *App) addWhitelist(discordId, minecraftUsername string) {
 		return
 	}
 
-	fmt.Fprintf(a.MinecraftConn, "whitelist add %s\n", minecraftUsername)
+	msg := fmt.Sprintf("whitelist add %s\n", minecraftUsername)
+	ctx := context.Background()
+	_, err = a.MinecraftConn.Send(ctx, []byte(msg))
+	if err != nil {
+		log.Printf("Error sending to Minecraft mod: %v", err)
+	}
 
 	log.Printf("Added %s to whitelist (Discord ID: %s)", minecraftUsername, discordId)
 }
@@ -262,7 +273,12 @@ func (a *App) removeWhitelist(discordId string) {
 		return
 	}
 
-	fmt.Fprintf(a.MinecraftConn, "unwhitelist %s\n", whitelistEntry.MinecraftUsername)
+	msg := fmt.Sprintf("unwhitelist %s\n", whitelistEntry.MinecraftUsername)
+	ctx := context.Background()
+	_, err = a.MinecraftConn.Send(ctx, []byte(msg))
+	if err != nil {
+		log.Printf("Error sending to Minecraft mod: %v", err)
+	}
 
 	err = a.RemoveWhitelistDatabaseEntry(whitelistEntry.ID)
 	if err != nil {

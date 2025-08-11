@@ -1,10 +1,11 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
+	"limpan/rotaria-bot/internals/tcpbridge"
 	"log"
-	"net"
 	"os"
 	"os/signal"
 
@@ -19,8 +20,8 @@ type Config struct {
 	MinecraftDiscordMessengerChannelID string
 	ServerStatusChannelID              string
 	DatabaseConfigPath                 string
-	MemberRoleID					   string
-	GuildID							   string
+	MemberRoleID                       string
+	GuildID                            string
 }
 
 type MinecraftServerStatus struct {
@@ -31,7 +32,7 @@ type MinecraftServerStatus struct {
 type App struct {
 	Config         Config
 	DiscordSession *discordgo.Session
-	MinecraftConn  net.Conn
+	MinecraftConn  *tcpbridge.Client
 	DatabaseConn   *sql.DB
 	Commands       []*discordgo.ApplicationCommand
 	// minecraftServerStatus MinecraftServerStatus // TODO: add this, easier to manage and formatting is nice :D
@@ -84,8 +85,8 @@ func (a *App) loadConfig() error {
 		ServerStatusChannelID:              os.Getenv("ServerStatusChannelID"),
 		MinecraftAddress:                   os.Getenv("MinecraftAddress"),
 		DatabaseConfigPath:                 os.Getenv("DatabaseConfigPath"),
-		MemberRoleID:                 		os.Getenv("MemberRoleID"),
-		GuildID:                			os.Getenv("GuildID"),
+		MemberRoleID:                       os.Getenv("MemberRoleID"),
+		GuildID:                            os.Getenv("GuildID"),
 	}
 
 	if a.Config.DiscordToken == "" {
@@ -114,9 +115,12 @@ func (a *App) connectToServices() error {
 	a.InitializeDatabase()
 
 	// Connect to Minecraft server
-	a.MinecraftConn, err = net.Dial("tcp", a.Config.MinecraftAddress)
-	if err != nil {
-		return fmt.Errorf("failed to connect to Minecraft mod socket: %w", err)
+	a.MinecraftConn = tcpbridge.New(a.Config.MinecraftAddress, tcpbridge.Options{})
+	ctx := context.Background()
+	a.MinecraftConn.Start(ctx)
+	st := a.MinecraftConn.Status()
+	if !st.Connected && st.BreakerState != tcpbridge.BreakerClosed {
+		return fmt.Errorf("failed to connect to Minecraft mod socket: %w", tcpbridge.ErrUnavailable)
 	}
 	log.Printf("Connected to Minecraft mod socket on %s", a.Config.MinecraftAddress)
 
@@ -190,7 +194,8 @@ func (a *App) onDiscordMessage(s *discordgo.Session, m *discordgo.MessageCreate)
 
 		msg := fmt.Sprintf("[Discord] %s: %s", m.Author.Username, m.Content)
 
-		_, err := fmt.Fprintln(a.MinecraftConn, msg)
+		ctx := context.Background()
+		_, err := a.MinecraftConn.Send(ctx, []byte(msg))
 		if err != nil {
 			log.Printf("Error sending to Minecraft mod: %v", err)
 		} else {
