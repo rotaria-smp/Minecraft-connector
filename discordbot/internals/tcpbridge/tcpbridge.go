@@ -276,6 +276,7 @@ func (c *Client) run(ctx context.Context, conn net.Conn) error {
 			line = strings.TrimSpace(line)
 			if line == "PONG" {
 				c.debugf("recv PONG")
+				// fmt.Printf("recv PONG\n")
 				c.lastPongNS.Store(time.Now().UnixNano())
 				continue
 			}

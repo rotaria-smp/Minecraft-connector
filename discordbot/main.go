@@ -115,7 +115,7 @@ func (a *App) connectToServices() error {
 	a.InitializeDatabase()
 
 	// Connect to Minecraft server
-	a.MinecraftConn = tcpbridge.New(a.Config.MinecraftAddress, tcpbridge.Options{Log: log.Default()})
+	a.MinecraftConn = tcpbridge.New(a.Config.MinecraftAddress, tcpbridge.Options{Log: log.New(os.Stdout, "tcpbridge: ", log.LstdFlags)})
 	ctx := context.Background()
 	a.MinecraftConn.Start(ctx)
 	st := a.MinecraftConn.Status()
