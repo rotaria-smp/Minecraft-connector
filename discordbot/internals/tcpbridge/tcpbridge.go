@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"strings"
 	"sync"
@@ -14,11 +15,16 @@ import (
 	"time"
 )
 
+// Logger is anything with Printf(string, ...any). stdlib *log.Logger works.
+type Logger interface {
+	Printf(string, ...any)
+}
+
 // Wire protocol (simple, text-based):
 //   Heartbeat:  client -> "PING", server -> "PONG"
-//   Command:    client -> "CMD <id> <len><payload>"
-//               server -> "RES <id> <len><body>"   (or "ERR <id> <len><msg>")
-//   Event push: server -> "EVT <topic> <len><body>"   (unsolicited message/broadcast)
+//   Command:    client -> "CMD <id> <len>\n<payload>"
+//               server -> "RES <id> <len>\n<body>"   (or "ERR <id> <len>\n<msg>")
+//   Event push: server -> "EVT <topic> <len>\n<body>"   (unsolicited message/broadcast)
 
 var (
 	ErrUnavailable = errors.New("tcpbridge: connection unavailable")
@@ -41,6 +47,10 @@ type Options struct {
 	// Circuit breaker (simple built-in)
 	BreakerFailures int           // failures before open; default 3
 	BreakerOpenFor  time.Duration // how long to stay open; default 10s
+
+	// Logging
+	Log   Logger // optional; if nil, logging is disabled
+	Debug bool   // verbose logs
 }
 
 func (o *Options) setDefaults() {
@@ -141,6 +151,27 @@ func New(addr string, opt Options) *Client {
 	return c
 }
 
+func (c *Client) infof(format string, args ...any) {
+	if c.opt.Log != nil {
+		c.opt.Log.Printf("[tcpbridge] "+format, args...)
+	}
+}
+func (c *Client) debugf(format string, args ...any) {
+	if c.opt.Debug && c.opt.Log != nil {
+		c.opt.Log.Printf("[tcpbridge] "+format, args...)
+	}
+}
+func (c *Client) warnf(format string, args ...any) {
+	if c.opt.Log != nil {
+		c.opt.Log.Printf("[tcpbridge][WARN] "+format, args...)
+	}
+}
+func (c *Client) errf(format string, args ...any) {
+	if c.opt.Log != nil {
+		c.opt.Log.Printf("[tcpbridge][ERROR] "+format, args...)
+	}
+}
+
 // Start runs the connect/reconnect loop until ctx is done.
 func (c *Client) Start(ctx context.Context) {
 	c.wg.Add(1)
@@ -148,10 +179,11 @@ func (c *Client) Start(ctx context.Context) {
 		defer c.wg.Done()
 		backoff := time.Second
 		for ctx.Err() == nil && !c.closed.Load() {
+			c.infof("dialing %s", c.addr)
 			conn, err := net.DialTimeout("tcp", c.addr, c.opt.DialTimeout)
 			if err != nil {
-				// backoff with jitter
 				sleep := backoff + time.Duration(randUint32()%500)*time.Millisecond
+				c.warnf("dial failed: %v; retrying in %v", err, sleep)
 				if backoff < c.opt.ReconnectMaxBackoff {
 					backoff *= 2
 					if backoff > c.opt.ReconnectMaxBackoff {
@@ -166,10 +198,11 @@ func (c *Client) Start(ctx context.Context) {
 				}
 				continue
 			}
+			c.infof("connected to %s", c.addr)
 			backoff = time.Second
 			c.setConn(conn)
 			if err := c.run(ctx, conn); err != nil {
-				// connection ended; loop and reconnect
+				c.warnf("run loop ended: %v (will reconnect)", err)
 			}
 		}
 	}()
@@ -179,6 +212,7 @@ func (c *Client) Close() error {
 	if !c.closed.CompareAndSwap(false, true) {
 		return nil
 	}
+	c.infof("close requested")
 	c.mu.Lock()
 	if c.conn != nil {
 		_ = c.conn.Close()
@@ -187,6 +221,7 @@ func (c *Client) Close() error {
 	close(c.wq)
 	c.failAllPending(errors.New("connection closed"))
 	c.wg.Wait()
+	c.infof("closed")
 	return nil
 }
 
@@ -210,15 +245,28 @@ func (c *Client) run(ctx context.Context, conn net.Conn) error {
 				errs <- err
 				return
 			}
+			// cheap header peek for logs
+			if len(buf) >= 3 {
+				h := string(buf[:3])
+				switch h {
+				case "PIN":
+					c.debugf("sent PING")
+				case "CMD":
+					// extract id/len from header up to newline
+					if nl := strings.IndexByte(string(buf), '\n'); nl > 0 {
+						c.debugf("sent %s", strings.TrimSpace(string(buf[:nl])))
+					}
+				default:
+					// ignore
+				}
+			}
 		}
 	}()
 
-	// reader/demux
 	go func() {
 		defer c.wg.Done()
 		br := bufio.NewReader(conn)
 		for {
-			// keep read fresh to detect dead peers
 			_ = conn.SetReadDeadline(time.Now().Add(c.opt.ReadTimeout))
 			line, err := br.ReadString('\n')
 			if err != nil {
@@ -227,6 +275,7 @@ func (c *Client) run(ctx context.Context, conn net.Conn) error {
 			}
 			line = strings.TrimSpace(line)
 			if line == "PONG" {
+				c.debugf("recv PONG")
 				c.lastPongNS.Store(time.Now().UnixNano())
 				continue
 			}
@@ -238,15 +287,20 @@ func (c *Client) run(ctx context.Context, conn net.Conn) error {
 			kind, a, nStr := parts[0], parts[1], parts[2]
 			var n int
 			_, err = fmt.Sscanf(nStr, "%d", &n)
-			if err != nil || n < 0 || n > 16<<20 { // 16MB guard
+			if err != nil || n < 0 || n > 16<<20 {
 				errs <- ErrBadFrame
 				return
 			}
+			c.debugf("recv header: %s %s %d", kind, a, n)
+
 			payload := make([]byte, n)
-			if _, err := ioReadFullWithDeadline(conn, payload, c.opt.ReadTimeout); err != nil {
+			_ = conn.SetReadDeadline(time.Now().Add(c.opt.ReadTimeout))
+			// IMPORTANT: read from *br*, not conn
+			if _, err := io.ReadFull(br, payload); err != nil {
 				errs <- err
 				return
 			}
+
 			switch kind {
 			case "RES":
 				c.complete(a, payload, nil)
@@ -270,17 +324,15 @@ func (c *Client) run(ctx context.Context, conn net.Conn) error {
 			select {
 			case <-t.C:
 				last := time.Unix(0, c.lastPongNS.Load())
-				// send PING
+				c.debugf("hb: sending PING")
 				c.enqueue([]byte("PING\n"))
-				// wait HeartbeatTimeout for a newer PONG
 				tmr := time.NewTimer(c.opt.HeartbeatTimeout)
 				select {
 				case <-tmr.C:
 					if time.Unix(0, c.lastPongNS.Load()).After(last) {
-						// ok
 						continue
 					}
-					// miss -> force close; reconnect loop takes over
+					c.warnf("hb: missed PONG within %v, closing conn to trigger reconnect", c.opt.HeartbeatTimeout)
 					_ = conn.Close()
 					return
 				case <-ctx.Done():
@@ -305,6 +357,7 @@ func (c *Client) run(ctx context.Context, conn net.Conn) error {
 	c.healthy.Store(false)
 	_ = conn.Close()
 	c.failAllPending(ErrUnavailable)
+	c.infof("connection down: %v", err)
 	return err
 }
 
@@ -314,26 +367,28 @@ func (c *Client) writeFrame(conn net.Conn, buf []byte) (int, error) {
 }
 
 func (c *Client) enqueue(buf []byte) {
-	// best-effort; drop if closed
 	select {
 	case c.wq <- buf:
 	default:
 		// backpressure: block to preserve ordering
+		c.warnf("writer queue full (%d), blocking", len(c.wq))
 		c.wq <- buf
 	}
 }
 
 // Send transmits a command payload and waits for a response body.
-// It returns ErrUnavailable immediately if the connection is down or breaker is open.
 func (c *Client) Send(ctx context.Context, payload []byte) ([]byte, error) {
 	if c.closed.Load() {
+		c.warnf("Send: client closed")
 		return nil, ErrClosed
 	}
 	if !c.healthy.Load() {
+		c.warnf("Send: unhealthy -> ErrUnavailable")
 		c.noteFailure()
 		return nil, ErrUnavailable
 	}
 	if c.isBreakerOpen() {
+		c.warnf("Send: breaker open")
 		return nil, ErrBreakerOpen
 	}
 	id := newID()
@@ -341,13 +396,13 @@ func (c *Client) Send(ctx context.Context, payload []byte) ([]byte, error) {
 
 	c.pendingMu.Lock()
 	c.pending[id] = respCh
+	pendingCount := len(c.pending)
 	c.pendingMu.Unlock()
 
-	// frame: CMD <id> <len>\n<payload>
 	hdr := fmt.Sprintf("CMD %s %d\n", id, len(payload))
+	c.debugf("Send: enqueue %s (pending=%d)", strings.TrimSpace(hdr), pendingCount)
 	c.enqueue(append([]byte(hdr), payload...))
 
-	// wait
 	tmo := c.opt.CommandTimeout
 	if deadline, ok := ctx.Deadline(); ok {
 		if d := time.Until(deadline); d < tmo {
@@ -362,16 +417,20 @@ func (c *Client) Send(ctx context.Context, payload []byte) ([]byte, error) {
 	case <-tmr.C:
 		c.removePending(id)
 		c.noteFailure()
+		c.warnf("Send: timeout after %v (id=%s)", tmo, id)
 		return nil, ErrTimeout
 	case <-ctx.Done():
 		c.removePending(id)
 		c.noteFailure()
+		c.warnf("Send: ctx done: %v (id=%s)", ctx.Err(), id)
 		return nil, ctx.Err()
 	}
 	if res.err != nil {
 		c.noteFailure()
+		c.warnf("Send: ERR (id=%s): %v", id, res.err)
 		return nil, res.err
 	}
+	c.debugf("Send: RES (id=%s, len=%d)", id, len(res.body))
 	c.noteSuccess()
 	return res.body, nil
 }
@@ -385,6 +444,8 @@ func (c *Client) complete(id string, body []byte, err error) {
 	c.pendingMu.Unlock()
 	if ok {
 		ch <- Response{body: body, err: err}
+	} else {
+		c.debugf("complete: unknown id %s (late frame?)", id)
 	}
 }
 
@@ -400,7 +461,9 @@ func (c *Client) failAllPending(err error) {
 		delete(c.pending, id)
 		ch <- Response{err: err}
 	}
+	n := len(c.pending)
 	c.pendingMu.Unlock()
+	c.warnf("failAllPending: flushed pending (remaining=%d)", n)
 }
 
 // --- subscriptions for unsolicited events ---
@@ -418,6 +481,8 @@ func (c *Client) Subscribe(buffer int) (id int64, ch <-chan Event, cancel func()
 	c.subs[cid] = eventCh
 	c.subsMu.Unlock()
 
+	c.infof("subscribe: id=%d buffer=%d", cid, buffer)
+
 	cancel = func() {
 		c.subsMu.Lock()
 		if ch, ok := c.subs[cid]; ok {
@@ -425,17 +490,18 @@ func (c *Client) Subscribe(buffer int) (id int64, ch <-chan Event, cancel func()
 			close(ch)
 		}
 		c.subsMu.Unlock()
+		c.infof("unsubscribe: id=%d", cid)
 	}
 	return cid, eventCh, cancel
 }
 
 func (c *Client) broadcast(evt Event) {
 	c.subsMu.RLock()
-	for _, ch := range c.subs {
+	for id, ch := range c.subs {
 		select {
 		case ch <- evt:
 		default:
-			// drop if subscriber is slow
+			c.debugf("broadcast: drop to slow sub id=%d topic=%s", id, evt.Topic)
 		}
 	}
 	c.subsMu.RUnlock()
@@ -446,7 +512,7 @@ func (c *Client) Status() Status {
 	st := Status{}
 	st.Connected = c.healthy.Load()
 	st.LastHeartbeat = time.Unix(0, c.lastPongNS.Load())
-	st.QueueLen = len(c.wq) // pending writes
+	st.QueueLen = len(c.wq)
 	st.BreakerState = func() BreakerState {
 		c.brMu.Lock()
 		defer c.brMu.Unlock()
@@ -469,11 +535,18 @@ func (c *Client) noteFailure() {
 	if c.consecFailures >= c.opt.BreakerFailures && time.Now().After(c.openUntil) {
 		c.openUntil = time.Now().Add(c.opt.BreakerOpenFor)
 		c.halfOpenProbeIn = false
+		if c.opt.Log != nil {
+			c.warnf("breaker: OPEN for %v (failures=%d)", c.opt.BreakerOpenFor, c.consecFailures)
+		}
 	}
 }
 
 func (c *Client) noteSuccess() {
+	prev := c.Status().BreakerState
 	c.resetBreaker()
+	if prev != BreakerClosed {
+		c.infof("breaker: CLOSED")
+	}
 }
 
 func (c *Client) resetBreaker() {
@@ -494,10 +567,10 @@ func (c *Client) isBreakerOpen() bool {
 	// half-open probe: allow a single caller after open window passes; others see open until success/failure
 	if !c.halfOpenProbeIn && !c.openUntil.IsZero() && now.After(c.openUntil) && c.consecFailures >= c.opt.BreakerFailures {
 		c.halfOpenProbeIn = true
+		c.infof("breaker: HALF-OPEN (probe)")
 		return false
 	}
 	if c.halfOpenProbeIn {
-		// one probe in flight; other callers still see open
 		return true
 	}
 	return false
@@ -528,18 +601,3 @@ func ioReadFullWithDeadline(conn net.Conn, buf []byte, d time.Duration) (int, er
 	}
 	return n, nil
 }
-
-// Example usage (pseudo):
-//   c := tcpbridge.New("127.0.0.1:25570", tcpbridge.Options{})
-//   c.Start(ctx)
-//   // subscribe to unsolicited events from the server
-//   _, events, cancel := c.Subscribe(128)
-//   defer cancel()
-//   go func(){
-//       for evt := range events {
-//           fmt.Printf("EVT %s: %s", evt.Topic, string(evt.Body))
-//       }
-//   }()
-//   // send a request/response command
-//   body, err := c.Send(ctx, []byte("/say hello"))
-//   st := c.Status()

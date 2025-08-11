@@ -64,7 +64,7 @@ func main() {
 
 	}
 	log.Println("Have setup Discord handlers")
-	go app.readMinecraftMessages()
+	// go app.readMinecraftMessages()
 
 	// Wait for interrupt signal
 	stop := make(chan os.Signal, 1)
@@ -115,7 +115,7 @@ func (a *App) connectToServices() error {
 	a.InitializeDatabase()
 
 	// Connect to Minecraft server
-	a.MinecraftConn = tcpbridge.New(a.Config.MinecraftAddress, tcpbridge.Options{})
+	a.MinecraftConn = tcpbridge.New(a.Config.MinecraftAddress, tcpbridge.Options{Log: log.Default()})
 	ctx := context.Background()
 	a.MinecraftConn.Start(ctx)
 	st := a.MinecraftConn.Status()
@@ -123,9 +123,8 @@ func (a *App) connectToServices() error {
 		return fmt.Errorf("failed to connect to Minecraft mod socket: %w", tcpbridge.ErrUnavailable)
 	}
 	log.Printf("Connected to Minecraft mod socket on %s", a.Config.MinecraftAddress)
-	_, events, cancel := a.MinecraftConn.Subscribe(256)
+	_, events, _ := a.MinecraftConn.Subscribe(256)
 	// TODO: handle events before merge
-	defer cancel()
 	go func() {
 		for evt := range events {
 			switch evt.Topic {
@@ -134,8 +133,8 @@ func (a *App) connectToServices() error {
 			case "leave":
 			case "status":
 			case "lifecycle":
-				log.Printf("event: %s", evt.Body)
 			}
+			log.Printf("Got event from tcpbridge: %s", evt)
 		}
 	}()
 	return nil
