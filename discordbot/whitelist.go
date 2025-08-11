@@ -179,6 +179,11 @@ func (a *App) onWhitelistModalResponse(s *discordgo.Session, i *discordgo.Intera
 
 		fmt.Fprintf(a.MinecraftConn, "whitelist add %s\n", username)
 
+		err := s.GuildMemberRoleAdd(a.Config.GuildID, requester, a.Config.MemberRoleID )
+		if err != nil {
+			log.Printf("Failed to assign role to %s: %v", requester, err)
+		}
+
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseUpdateMessage,
 			Data: &discordgo.InteractionResponseData{

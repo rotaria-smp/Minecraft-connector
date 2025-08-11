@@ -19,6 +19,8 @@ type Config struct {
 	MinecraftDiscordMessengerChannelID string
 	ServerStatusChannelID              string
 	DatabaseConfigPath                 string
+	MemberRoleID					   string
+	GuildID							   string
 }
 
 type MinecraftServerStatus struct {
@@ -82,6 +84,8 @@ func (a *App) loadConfig() error {
 		ServerStatusChannelID:              os.Getenv("ServerStatusChannelID"),
 		MinecraftAddress:                   os.Getenv("MinecraftAddress"),
 		DatabaseConfigPath:                 os.Getenv("DatabaseConfigPath"),
+		MemberRoleID:                 		os.Getenv("MemberRoleID"),
+		GuildID:                			os.Getenv("GuildID"),
 	}
 
 	if a.Config.DiscordToken == "" {
