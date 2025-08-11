@@ -63,7 +63,7 @@ public class DiscordBridge {
                 if (line == null) break;
 
                 if (line.equals("PING")) {
-                    writeAsciiLocal(rout, "PONG\n");
+                    writeAsciiLocal(rout, "PONG");
                     continue;
                 }
 
@@ -147,17 +147,17 @@ public class DiscordBridge {
     }
 
     public void sendEvent(String topic, byte[] body) {
-        String header = "EVT " + topic + " " + body.length + "\n";
+        String header = "EVT " + topic + " " + body.length + " ";
         writeEventFrame(header, body);
     }
 
     private void sendResLocal(OutputStream o, String id, byte[] body) {
-        writeFrameLocal(o, "RES " + id + " " + body.length + "\n", body);
+        writeFrameLocal(o, "RES " + id + " " + body.length + " ", body);
     }
 
     private void sendErrLocal(OutputStream o, String id, String msg) {
         byte[] b = msg.getBytes(StandardCharsets.UTF_8);
-        writeFrameLocal(o, "ERR " + id + " " + b.length + "\n", b);
+        writeFrameLocal(o, "ERR " + id + " " + b.length + " ", b);
     }
 
     private void writeFrameLocal(OutputStream o, String header, byte[] body) {
