@@ -3,9 +3,10 @@ package tcpbridge
 import (
 	"bufio"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
-	"limpan/rotaria-bot/internals/utils"
 	"net"
 	"strings"
 	"sync"
@@ -14,10 +15,10 @@ import (
 )
 
 // Wire protocol (simple, text-based):
-//   Heartbeat:  client -> "PING\n", server -> "PONG\n"
-//   Command:    client -> "CMD <id> <len>\n<payload>"
-//               server -> "RES <id> <len>\n<body>"   (or "ERR <id> <len>\n<msg>")
-// You can adapt encode/decodeCommand to your existing mod protocol if needed.
+//   Heartbeat:  client -> "PING", server -> "PONG"
+//   Command:    client -> "CMD <id> <len><payload>"
+//               server -> "RES <id> <len><body>"   (or "ERR <id> <len><msg>")
+//   Event push: server -> "EVT <topic> <len><body>"   (unsolicited message/broadcast)
 
 var (
 	ErrUnavailable = errors.New("tcpbridge: connection unavailable")
@@ -72,15 +73,30 @@ func (o *Options) setDefaults() {
 	}
 }
 
+// BreakerState represents the state of the circuit breaker
+type BreakerState int
+
+const (
+	BreakerClosed BreakerState = iota
+	BreakerOpen
+	BreakerHalfOpen
+)
+
 // Status is a snapshot for /status commands etc.
 type Status struct {
 	Connected     bool
-	BreakerState  string // closed|open|half-open
+	BreakerState  BreakerState
 	LastHeartbeat time.Time
 	QueueLen      int // number of in-flight requests
 }
 
-type response struct {
+// Event represents an unsolicited message pushed by the server.
+type Event struct {
+	Topic string
+	Body  []byte
+}
+
+type Response struct {
 	body []byte
 	err  error
 }
@@ -94,7 +110,11 @@ type Client struct {
 	wq   chan []byte // writes are serialized via this channel
 
 	pendingMu sync.Mutex
-	pending   map[string]chan response
+	pending   map[string]chan Response
+
+	subsMu sync.RWMutex
+	subs   map[int64]chan Event
+	subSeq atomic.Int64
 
 	healthy    atomic.Bool
 	lastPongNS atomic.Int64
@@ -115,7 +135,7 @@ func New(addr string, opt Options) *Client {
 		addr:    addr,
 		opt:     opt,
 		wq:      make(chan []byte, 128),
-		pending: make(map[string]chan response),
+		pending: make(map[string]chan Response),
 	}
 	c.lastPongNS.Store(time.Now().UnixNano())
 	return c
@@ -131,7 +151,7 @@ func (c *Client) Start(ctx context.Context) {
 			conn, err := net.DialTimeout("tcp", c.addr, c.opt.DialTimeout)
 			if err != nil {
 				// backoff with jitter
-				sleep := backoff + time.Duration(utils.RandUint32()%500)*time.Millisecond
+				sleep := backoff + time.Duration(randUint32()%500)*time.Millisecond
 				if backoff < c.opt.ReconnectMaxBackoff {
 					backoff *= 2
 					if backoff > c.opt.ReconnectMaxBackoff {
@@ -215,7 +235,7 @@ func (c *Client) run(ctx context.Context, conn net.Conn) error {
 				errs <- ErrBadFrame
 				return
 			}
-			kind, id, nStr := parts[0], parts[1], parts[2]
+			kind, a, nStr := parts[0], parts[1], parts[2]
 			var n int
 			_, err = fmt.Sscanf(nStr, "%d", &n)
 			if err != nil || n < 0 || n > 16<<20 { // 16MB guard
@@ -229,9 +249,11 @@ func (c *Client) run(ctx context.Context, conn net.Conn) error {
 			}
 			switch kind {
 			case "RES":
-				c.complete(id, payload, nil)
+				c.complete(a, payload, nil)
 			case "ERR":
-				c.complete(id, nil, errors.New(string(payload)))
+				c.complete(a, nil, errors.New(string(payload)))
+			case "EVT":
+				c.broadcast(Event{Topic: a, Body: payload})
 			default:
 				errs <- ErrBadFrame
 				return
@@ -314,8 +336,8 @@ func (c *Client) Send(ctx context.Context, payload []byte) ([]byte, error) {
 	if c.isBreakerOpen() {
 		return nil, ErrBreakerOpen
 	}
-	id := utils.NewID()
-	respCh := make(chan response, 1)
+	id := newID()
+	respCh := make(chan Response, 1)
 
 	c.pendingMu.Lock()
 	c.pending[id] = respCh
@@ -334,7 +356,7 @@ func (c *Client) Send(ctx context.Context, payload []byte) ([]byte, error) {
 	}
 	tmr := time.NewTimer(tmo)
 	defer tmr.Stop()
-	var res response
+	var res Response
 	select {
 	case res = <-respCh:
 	case <-tmr.C:
@@ -362,7 +384,7 @@ func (c *Client) complete(id string, body []byte, err error) {
 	}
 	c.pendingMu.Unlock()
 	if ok {
-		ch <- response{body: body, err: err}
+		ch <- Response{body: body, err: err}
 	}
 }
 
@@ -376,9 +398,47 @@ func (c *Client) failAllPending(err error) {
 	c.pendingMu.Lock()
 	for id, ch := range c.pending {
 		delete(c.pending, id)
-		ch <- response{err: err}
+		ch <- Response{err: err}
 	}
 	c.pendingMu.Unlock()
+}
+
+// --- subscriptions for unsolicited events ---
+func (c *Client) Subscribe(buffer int) (id int64, ch <-chan Event, cancel func()) {
+	if buffer <= 0 {
+		buffer = 64
+	}
+	cid := c.subSeq.Add(1)
+	eventCh := make(chan Event, buffer)
+
+	c.subsMu.Lock()
+	if c.subs == nil {
+		c.subs = make(map[int64]chan Event)
+	}
+	c.subs[cid] = eventCh
+	c.subsMu.Unlock()
+
+	cancel = func() {
+		c.subsMu.Lock()
+		if ch, ok := c.subs[cid]; ok {
+			delete(c.subs, cid)
+			close(ch)
+		}
+		c.subsMu.Unlock()
+	}
+	return cid, eventCh, cancel
+}
+
+func (c *Client) broadcast(evt Event) {
+	c.subsMu.RLock()
+	for _, ch := range c.subs {
+		select {
+		case ch <- evt:
+		default:
+			// drop if subscriber is slow
+		}
+	}
+	c.subsMu.RUnlock()
 }
 
 // Status returns a snapshot of client health.
@@ -387,16 +447,16 @@ func (c *Client) Status() Status {
 	st.Connected = c.healthy.Load()
 	st.LastHeartbeat = time.Unix(0, c.lastPongNS.Load())
 	st.QueueLen = len(c.wq) // pending writes
-	st.BreakerState = func() string {
+	st.BreakerState = func() BreakerState {
 		c.brMu.Lock()
 		defer c.brMu.Unlock()
 		if time.Now().Before(c.openUntil) {
-			return "open"
+			return BreakerOpen
 		}
 		if c.halfOpenProbeIn {
-			return "half-open"
+			return BreakerHalfOpen
 		}
-		return "closed"
+		return BreakerClosed
 	}()
 	return st
 }
@@ -444,6 +504,17 @@ func (c *Client) isBreakerOpen() bool {
 }
 
 // --- utils ---
+func newID() string {
+	var b [16]byte
+	_, _ = rand.Read(b[:])
+	return hex.EncodeToString(b[:])
+}
+
+func randUint32() uint32 {
+	var b [4]byte
+	_, _ = rand.Read(b[:])
+	return uint32(b[0])<<24 | uint32(b[1])<<16 | uint32(b[2])<<8 | uint32(b[3])
+}
 
 func ioReadFullWithDeadline(conn net.Conn, buf []byte, d time.Duration) (int, error) {
 	var n int
@@ -461,5 +532,14 @@ func ioReadFullWithDeadline(conn net.Conn, buf []byte, d time.Duration) (int, er
 // Example usage (pseudo):
 //   c := tcpbridge.New("127.0.0.1:25570", tcpbridge.Options{})
 //   c.Start(ctx)
+//   // subscribe to unsolicited events from the server
+//   _, events, cancel := c.Subscribe(128)
+//   defer cancel()
+//   go func(){
+//       for evt := range events {
+//           fmt.Printf("EVT %s: %s", evt.Topic, string(evt.Body))
+//       }
+//   }()
+//   // send a request/response command
 //   body, err := c.Send(ctx, []byte("/say hello"))
 //   st := c.Status()
