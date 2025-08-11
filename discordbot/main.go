@@ -134,7 +134,7 @@ func (a *App) connectToServices() error {
 			case "status":
 			case "lifecycle":
 			}
-			log.Printf("Got event from tcpbridge: %s", evt)
+			log.Printf("Got event from tcpbridge: topic: {%s} body: {%s}", evt.Topic, string(evt.Body))
 		}
 	}()
 	return nil
