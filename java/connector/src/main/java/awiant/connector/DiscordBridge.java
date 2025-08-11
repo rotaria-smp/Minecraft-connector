@@ -14,9 +14,8 @@ import java.util.concurrent.TimeUnit;
 public class DiscordBridge {
     private ServerSocket serverSocket;
     private volatile Socket clientSocket;
-    private volatile OutputStream out;
-    private volatile BufferedReader headerIn;
-    private volatile InputStream rawIn;
+    // Only used for broadcasting EVT frames to the *current* client
+    private volatile OutputStream eventOut;
     private final int port;
 
     public DiscordBridge(int port) {
@@ -46,24 +45,25 @@ public class DiscordBridge {
     private synchronized void replaceClient(Socket s) throws IOException {
         closeClient();
         clientSocket = s;
-        out = s.getOutputStream();
-        rawIn = s.getInputStream();
-        headerIn = new BufferedReader(new InputStreamReader(rawIn, StandardCharsets.UTF_8));
+        eventOut = s.getOutputStream(); // for EVT broadcasts
     }
 
     private synchronized void closeClient() {
         try { if (clientSocket != null) clientSocket.close(); } catch (IOException ignore) {}
-        clientSocket = null; out = null; rawIn = null; headerIn = null;
+        clientSocket = null; eventOut = null;
     }
 
     private void handleClient(Socket s) {
-        try {
+        try (InputStream rin = s.getInputStream();
+             OutputStream rout = s.getOutputStream();
+             BufferedReader hin = new BufferedReader(new InputStreamReader(rin, StandardCharsets.UTF_8))) {
+
             for (;;) {
-                String line = headerIn.readLine();
+                String line = hin.readLine();
                 if (line == null) break;
 
                 if (line.equals("PING")) {
-                    writeAscii("PONG\n");
+                    writeAsciiLocal(rout, "PONG\n");
                     continue;
                 }
 
@@ -76,9 +76,11 @@ public class DiscordBridge {
                 String kind = parts[0];
                 if ("CMD".equals(kind)) {
                     String id = parts[1];
-                    int n = Integer.parseInt(parts[2]);
-                    byte[] body = readN(rawIn, n);
-                    onCommand(id, body);
+                    int n;
+                    try { n = Integer.parseInt(parts[2]); } catch (NumberFormatException e) { Connector.LOGGER.warn("Bad length in frame: {}", line); break; }
+                    if (n < 0 || n > (16 << 20)) { Connector.LOGGER.warn("Suspicious length: {}", n); break; }
+                    byte[] body = readN(rin, n);
+                    onCommand(rout, id, body);
                 } else {
                     Connector.LOGGER.warn("Unknown frame: {}", line);
                 }
@@ -90,11 +92,11 @@ public class DiscordBridge {
         }
     }
 
-    private void onCommand(String id, byte[] body) {
+    private void onCommand(OutputStream rout, String id, byte[] body) {
         String cmd = new String(body, StandardCharsets.UTF_8).trim();
         MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
         if (server == null) {
-            sendErr(id, "server not ready");
+            sendErrLocal(rout, id, "server not ready");
             return;
         }
 
@@ -111,8 +113,12 @@ public class DiscordBridge {
                     String playerName = cmd.substring("unwhitelist ".length()).trim();
                     WhitelistHandler.removeFromWhitelist(server, playerName);
                     fut.complete("ok");
+                } else if (lower.startsWith("say ")) {
+                    String msg = cmd.substring("say ".length());
+                    server.getPlayerList().broadcastSystemMessage(Component.literal(msg), false);
+                    fut.complete("ok");
                 } else {
-                    // Default: broadcast the payload as a server message
+                    // Default: treat as plain chat broadcast
                     server.getPlayerList().broadcastSystemMessage(Component.literal(cmd), false);
                     fut.complete("ok");
                 }
@@ -123,15 +129,15 @@ public class DiscordBridge {
 
         try {
             String res = fut.get(5, TimeUnit.SECONDS);
-            sendRes(id, res.getBytes(StandardCharsets.UTF_8));
+            sendResLocal(rout, id, res.getBytes(StandardCharsets.UTF_8));
         } catch (Exception e) {
-            sendErr(id, e.getMessage() != null ? e.getMessage() : "error");
+            sendErrLocal(rout, id, e.getMessage() != null ? e.getMessage() : "error");
         }
     }
 
     // ---- outbound helpers (events + responses)
 
-    // Keep old name: now emits EVT "chat" so your existing callers still work.
+    // Back-compat: keep name but now emits EVT topic "chat".
     public void sendToDiscord(String message) {
         sendEventString("chat", message);
     }
@@ -141,36 +147,44 @@ public class DiscordBridge {
     }
 
     public void sendEvent(String topic, byte[] body) {
-        if (out == null) return;
         String header = "EVT " + topic + " " + body.length + "\n";
-        writeFrame(header, body);
+        writeEventFrame(header, body);
     }
 
-    private void sendRes(String id, byte[] body) {
-        writeFrame("RES " + id + " " + body.length + "\n", body);
+    private void sendResLocal(OutputStream o, String id, byte[] body) {
+        writeFrameLocal(o, "RES " + id + " " + body.length + "\n", body);
     }
 
-    private void sendErr(String id, String msg) {
+    private void sendErrLocal(OutputStream o, String id, String msg) {
         byte[] b = msg.getBytes(StandardCharsets.UTF_8);
-        writeFrame("ERR " + id + " " + b.length + "\n", b);
+        writeFrameLocal(o, "ERR " + id + " " + b.length + "\n", b);
     }
 
-    private synchronized void writeFrame(String header, byte[] body) {
+    private void writeFrameLocal(OutputStream o, String header, byte[] body) {
         try {
-            if (out == null) return;
-            out.write(header.getBytes(StandardCharsets.UTF_8));
-            out.write(body);
-            out.flush();
+            o.write(header.getBytes(StandardCharsets.UTF_8));
+            o.write(body);
+            o.flush();
         } catch (IOException e) {
             Connector.LOGGER.error("write failed", e);
+        }
+    }
+
+    private synchronized void writeEventFrame(String header, byte[] body) {
+        try {
+            if (eventOut == null) return;
+            eventOut.write(header.getBytes(StandardCharsets.UTF_8));
+            eventOut.write(body);
+            eventOut.flush();
+        } catch (IOException e) {
+            Connector.LOGGER.error("event write failed", e);
             closeClient();
         }
     }
 
-    private synchronized void writeAscii(String s) throws IOException {
-        if (out == null) return;
-        out.write(s.getBytes(StandardCharsets.UTF_8));
-        out.flush();
+    private void writeAsciiLocal(OutputStream o, String s) throws IOException {
+        o.write(s.getBytes(StandardCharsets.UTF_8));
+        o.flush();
     }
 
     private static byte[] readN(InputStream in, int n) throws IOException {
