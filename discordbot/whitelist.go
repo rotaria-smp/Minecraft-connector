@@ -184,6 +184,19 @@ func (a *App) onWhitelistModalResponse(s *discordgo.Session, i *discordgo.Intera
 			log.Printf("Failed to assign role to %s: %v", requester, err)
 		}
 
+		dm, err := s.UserChannelCreate(requester)
+		if err != nil {
+			log.Printf("Failed to create DM channel for %s: %v", requester, err)
+		} else {
+			_, err = s.ChannelMessageSend(dm.ID, fmt.Sprintf(
+				"✅ You have been whitelisted on Rotaria!\nWelcome, `%s` 🎉",
+				username,
+			))
+			if err != nil {
+				log.Printf("Failed to send DM to %s: %v", requester, err)
+			}
+		}
+
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseUpdateMessage,
 			Data: &discordgo.InteractionResponseData{
