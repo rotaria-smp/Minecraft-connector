@@ -67,7 +67,7 @@ func (a *App) GetWhitelistEntry(discordId string) (*WhiteListEntry, error) {
 	if a.DatabaseConn == nil {
 		return nil, sql.ErrConnDone
 	}
-	row := a.DatabaseConn.QueryRow(`SELECT discord_id, minecraft_username FROM whitelist WHERE discord_id = ?`, discordId)
+	row := a.DatabaseConn.QueryRow(`SELECT id, discord_id, minecraft_username FROM whitelist WHERE discord_id = ?`, discordId)
 
 	var entry WhiteListEntry
 	err := row.Scan(&entry.ID, &entry.DiscordID, &entry.MinecraftUsername)
