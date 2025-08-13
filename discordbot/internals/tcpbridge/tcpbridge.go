@@ -106,11 +106,11 @@ type response struct {
 
 // ndjson message schema
 type message struct {
-	Type  string `json:"type"`
-	ID    string `json:"id,omitempty"`
-	Body  string `json:"body,omitempty"`
-	Topic string `json:"topic,omitempty"`
-	Msg   string `json:"msg,omitempty"`
+	Type  string         `json:"type"`
+	ID    string         `json:"id,omitempty"`
+	Body  string         `json:"body,omitempty"`
+	Topic entities.Topic `json:"topic,omitempty"`
+	Msg   string         `json:"msg,omitempty"`
 }
 
 type Client struct {
