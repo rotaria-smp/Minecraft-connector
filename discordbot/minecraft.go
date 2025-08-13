@@ -19,40 +19,49 @@ func (a *App) readMinecraftMessages() {
 	defer cancel()
 
 	for evt := range events {
-		message := strings.TrimSpace(string(evt.Body))
-		if message == "" {
+		topic := evt.Topic
+		body := string(evt.Body)
+
+		if body == "" {
 			continue
 		}
 
-		if strings.HasPrefix(message, "[UPDATE]") {
-			latestStatus := strings.TrimPrefix(message, "[UPDATE] ")
-			log.Println("Status updated:", latestStatus)
-			a.updateBotPresence(latestStatus)
-			a.setVoiceChannelStatus(a.Config.ServerStatusChannelID, latestStatus)
-			continue
-		}
+		switch topic {
+		case "status":
+			log.Println("Status update received:", body)
+			parts := strings.SplitN(body, " ", 2)
+			if len(parts) < 2 {
+				log.Printf("Received from Minecraft: %s", body)
+				_, err := a.DiscordSession.ChannelMessageSend(a.Config.MinecraftDiscordMessengerChannelID, body)
+				if err != nil {
+					log.Printf("Error sending message to Discord: %v", err)
+				}
+				continue
+			}
 
-		parts := strings.SplitN(message, " ", 2)
-		if len(parts) < 2 {
-			log.Printf("Received from Minecraft: %s", message)
-			_, err := a.DiscordSession.ChannelMessageSend(a.Config.MinecraftDiscordMessengerChannelID, message)
+			username := parts[0]
+			content := parts[1]
+			content = strings.TrimPrefix(content, "literal{")
+			content = strings.TrimSuffix(content, "}")
+			content = strings.TrimSpace(content)
+
+			cleanedMessage := fmt.Sprintf("%s %s", username, content)
+			log.Printf("Received from Minecraft: %s", cleanedMessage)
+			_, err := a.DiscordSession.ChannelMessageSend(a.Config.MinecraftDiscordMessengerChannelID, cleanedMessage)
 			if err != nil {
 				log.Printf("Error sending message to Discord: %v", err)
 			}
-			continue
-		}
-
-		username := parts[0]
-		content := parts[1]
-		content = strings.TrimPrefix(content, "literal{")
-		content = strings.TrimSuffix(content, "}")
-		content = strings.TrimSpace(content)
-
-		cleanedMessage := fmt.Sprintf("%s %s", username, content)
-		log.Printf("Received from Minecraft: %s", cleanedMessage)
-		_, err := a.DiscordSession.ChannelMessageSend(a.Config.MinecraftDiscordMessengerChannelID, cleanedMessage)
-		if err != nil {
-			log.Printf("Error sending message to Discord: %v", err)
+		case "chat":
+			log.Println("Chat message received:", body)
+			if strings.HasPrefix(body, "[UPDATE]") {
+				latestStatus := strings.TrimPrefix(body, "[UPDATE] ")
+				log.Println("Status updated:", latestStatus)
+				a.updateBotPresence(latestStatus)
+				a.setVoiceChannelStatus(a.Config.ServerStatusChannelID, latestStatus)
+				continue
+			}
+		default:
+			log.Println("Unknown topic:", topic)
 		}
 	}
 }
