@@ -1,14 +1,8 @@
 package main
 
 import (
-	"fmt"
-
 	"github.com/bwmarrin/discordgo"
 )
-
-func generateStatusString(status MinecraftServerStatus) string {
-	return fmt.Sprintf("TPS: %d, Online: %d", status.TPS, status.PlayerCount)
-}
 
 func getModalInputValue(i *discordgo.InteractionCreate, customID string) string {
 	data := i.ModalSubmitData()

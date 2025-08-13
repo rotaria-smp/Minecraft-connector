@@ -2,8 +2,8 @@ package main
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
+	"limpan/rotaria-bot/internals/db"
 	"limpan/rotaria-bot/internals/tcpbridge"
 	"log"
 	"os"
@@ -28,7 +28,6 @@ type App struct {
 	Config         Config
 	DiscordSession *discordgo.Session
 	MinecraftConn  *tcpbridge.Client
-	DatabaseConn   *sql.DB
 	Commands       []*discordgo.ApplicationCommand
 }
 
@@ -106,10 +105,10 @@ func (a *App) connectToServices() error {
 		return fmt.Errorf("cannot open Discord session: %w", err)
 	}
 
-	a.InitializeDatabase()
+	db.InitializeDatabase(a.Config.DatabaseConfigPath)
 
 	// Connect to Minecraft server
-	a.MinecraftConn = tcpbridge.New(a.Config.MinecraftAddress, tcpbridge.Options{Log: log.New(os.Stdout, "tcpbridge: ", log.LstdFlags)})
+	a.MinecraftConn = tcpbridge.New(a.Config.MinecraftAddress, tcpbridge.Options{}) //, tcpbridge.Options{Log: log.New(os.Stdout, "tcpbridge: ", log.LstdFlags)})
 	ctx := context.Background()
 	a.MinecraftConn.Start(ctx)
 	st := a.MinecraftConn.Status()
@@ -161,9 +160,8 @@ func (a *App) shutdown() {
 	if a.MinecraftConn != nil {
 		a.MinecraftConn.Close()
 	}
-	if a.DatabaseConn != nil {
-		a.CloseDatabase()
-	}
+
+	db.Close()
 }
 
 func onApplicationCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {

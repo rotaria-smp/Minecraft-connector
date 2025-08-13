@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"fmt"
+	"limpan/rotaria-bot/entities"
+	"limpan/rotaria-bot/internals/db"
 	"limpan/rotaria-bot/namemc"
 	"log"
 	"strings"
@@ -226,17 +228,12 @@ func (a *App) onWhitelistModalResponse(s *discordgo.Session, i *discordgo.Intera
 }
 
 func (a *App) addWhitelist(discordId, minecraftUsername string) {
-	whitelistEntry := WhiteListEntry{
+	whitelistEntry := entities.WhiteListEntry{
 		DiscordID:         discordId,
 		MinecraftUsername: minecraftUsername,
 	}
-	/*
-		Det finns en chans att vi lägger till användare i databasen men att vi har tappat kontakten med spelet.
-		Isådannafall så kommer vi sluta upp med användare som är whitelistade enl botten men inte i spelet.
-		TODO: Vi bör ha något form av att hantera detta
-	*/
 
-	err := a.AddWhitelistDatabaseEntry(whitelistEntry)
+	err := db.AddWhitelistDatabaseEntry(whitelistEntry)
 	if err != nil {
 		log.Printf("Error adding whitelist entry for Discord ID %s: %v", discordId, err)
 		return
@@ -258,7 +255,7 @@ func (a *App) addWhitelist(discordId, minecraftUsername string) {
 }
 
 func (a *App) removeWhitelist(discordId string) {
-	whitelistEntry, err := a.GetWhitelistEntry(discordId)
+	whitelistEntry, err := db.GetWhitelistEntry(discordId)
 	if err != nil {
 		log.Printf("Error retrieving whitelist entry for Discord ID %s: %v", discordId, err)
 		return
@@ -280,7 +277,7 @@ func (a *App) removeWhitelist(discordId string) {
 		log.Printf("Error sending to Minecraft mod: %v", err)
 	}
 
-	err = a.RemoveWhitelistDatabaseEntry(whitelistEntry.ID)
+	err = db.RemoveWhitelistDatabaseEntry(whitelistEntry.ID)
 	if err != nil {
 		log.Printf("Error removing whitelist entry for Discord ID %s: %v", discordId, err)
 		return
