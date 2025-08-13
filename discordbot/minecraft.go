@@ -21,7 +21,7 @@ func (a *App) readMinecraftMessages() {
 	for evt := range events {
 		topic := evt.Topic
 		body := string(evt.Body)
-
+		log.Printf("Received from Minecraft topic %s: %s", topic, body)
 		if body == "" {
 			continue
 		}
