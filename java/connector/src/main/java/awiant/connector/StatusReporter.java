@@ -35,12 +35,9 @@ public class StatusReporter {
 
         int playerCount = server.getPlayerList().getPlayerCount();
         List<ServerPlayer> players = server.getPlayerList().getPlayers();
-        String playerNames = players.stream()
-                .map(p -> p.getGameProfile().getName())
-                .collect(Collectors.joining(", "));
 
-        String statusMessage = String.format("[UPDATE] TPS: %.2f | Online: %d%s",
-                tps, playerCount, playerCount > 0 ? (" | Players: " + playerNames) : "");
+        String statusMessage = String.format("[UPDATE] TPS: %.2f %s",
+                tps, playerCount > 0 ? (" | Online: " + playerCount) : "");
 
         if (Connector.bridge != null) {
             Connector.bridge.sendEventString("status", statusMessage);
