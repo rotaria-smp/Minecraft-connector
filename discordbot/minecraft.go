@@ -27,7 +27,7 @@ func (a *App) readMinecraftMessages() {
 		}
 
 		switch topic {
-		case "status":
+		case "chat":
 			log.Println("Status update received:", body)
 			parts := strings.SplitN(body, " ", 2)
 			if len(parts) < 2 {
@@ -51,7 +51,7 @@ func (a *App) readMinecraftMessages() {
 			if err != nil {
 				log.Printf("Error sending message to Discord: %v", err)
 			}
-		case "chat":
+		case "status":
 			log.Println("Chat message received:", body)
 			if strings.HasPrefix(body, "[UPDATE]") {
 				latestStatus := strings.TrimPrefix(body, "[UPDATE] ")
