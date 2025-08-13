@@ -24,18 +24,12 @@ type Config struct {
 	GuildID                            string
 }
 
-type MinecraftServerStatus struct {
-	TPS         int
-	PlayerCount int
-}
-
 type App struct {
 	Config         Config
 	DiscordSession *discordgo.Session
 	MinecraftConn  *tcpbridge.Client
 	DatabaseConn   *sql.DB
 	Commands       []*discordgo.ApplicationCommand
-	// minecraftServerStatus MinecraftServerStatus // TODO: add this, easier to manage and formatting is nice :D
 }
 
 // TODO: Fuck den här, vi måste lösa det på nått bättre sätt sen
