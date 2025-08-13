@@ -1,7 +1,10 @@
 package main
 
 import (
+	"context"
 	"fmt"
+	"limpan/rotaria-bot/entities"
+	"limpan/rotaria-bot/internals/db"
 	"limpan/rotaria-bot/namemc"
 	"log"
 	"strings"
@@ -177,9 +180,14 @@ func (a *App) onWhitelistModalResponse(s *discordgo.Session, i *discordgo.Intera
 		requester := parts[1]
 		a.addWhitelist(requester, username)
 
-		fmt.Fprintf(a.MinecraftConn, "whitelist add %s\n", username)
+		msg := fmt.Sprintf("whitelist add %s\n", username)
+		ctx := context.Background()
+		_, err := a.MinecraftConn.Send(ctx, []byte(msg))
+		if err != nil {
+			log.Printf("Error sending to Minecraft mod: %v", err)
+		}
 
-		err := s.GuildMemberRoleAdd(a.Config.GuildID, requester, a.Config.MemberRoleID )
+		err = s.GuildMemberRoleAdd(a.Config.GuildID, requester, a.Config.MemberRoleID)
 		if err != nil {
 			log.Printf("Failed to assign role to %s: %v", requester, err)
 		}
@@ -220,17 +228,12 @@ func (a *App) onWhitelistModalResponse(s *discordgo.Session, i *discordgo.Intera
 }
 
 func (a *App) addWhitelist(discordId, minecraftUsername string) {
-	whitelistEntry := WhiteListEntry{
+	whitelistEntry := entities.WhiteListEntry{
 		DiscordID:         discordId,
 		MinecraftUsername: minecraftUsername,
 	}
-	/*
-		Det finns en chans att vi lägger till användare i databasen men att vi har tappat kontakten med spelet.
-		Isådannafall så kommer vi sluta upp med användare som är whitelistade enl botten men inte i spelet.
-		TODO: Vi bör ha något form av att hantera detta
-	*/
 
-	err := a.AddWhitelistDatabaseEntry(whitelistEntry)
+	err := db.AddWhitelistDatabaseEntry(whitelistEntry)
 	if err != nil {
 		log.Printf("Error adding whitelist entry for Discord ID %s: %v", discordId, err)
 		return
@@ -241,13 +244,18 @@ func (a *App) addWhitelist(discordId, minecraftUsername string) {
 		return
 	}
 
-	fmt.Fprintf(a.MinecraftConn, "whitelist add %s\n", minecraftUsername)
+	msg := fmt.Sprintf("whitelist add %s\n", minecraftUsername)
+	ctx := context.Background()
+	_, err = a.MinecraftConn.Send(ctx, []byte(msg))
+	if err != nil {
+		log.Printf("Error sending to Minecraft mod: %v", err)
+	}
 
 	log.Printf("Added %s to whitelist (Discord ID: %s)", minecraftUsername, discordId)
 }
 
 func (a *App) removeWhitelist(discordId string) {
-	whitelistEntry, err := a.GetWhitelistEntry(discordId)
+	whitelistEntry, err := db.GetWhitelistEntry(discordId)
 	if err != nil {
 		log.Printf("Error retrieving whitelist entry for Discord ID %s: %v", discordId, err)
 		return
@@ -262,9 +270,14 @@ func (a *App) removeWhitelist(discordId string) {
 		return
 	}
 
-	fmt.Fprintf(a.MinecraftConn, "unwhitelist %s\n", whitelistEntry.MinecraftUsername)
+	msg := fmt.Sprintf("unwhitelist %s\n", whitelistEntry.MinecraftUsername)
+	ctx := context.Background()
+	_, err = a.MinecraftConn.Send(ctx, []byte(msg))
+	if err != nil {
+		log.Printf("Error sending to Minecraft mod: %v", err)
+	}
 
-	err = a.RemoveWhitelistDatabaseEntry(whitelistEntry.ID)
+	err = db.RemoveWhitelistDatabaseEntry(whitelistEntry.ID)
 	if err != nil {
 		log.Printf("Error removing whitelist entry for Discord ID %s: %v", discordId, err)
 		return

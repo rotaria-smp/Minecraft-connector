@@ -1,10 +1,11 @@
 package main
 
 import (
-	"database/sql"
+	"context"
 	"fmt"
+	"limpan/rotaria-bot/internals/db"
+	"limpan/rotaria-bot/internals/tcpbridge"
 	"log"
-	"net"
 	"os"
 	"os/signal"
 
@@ -19,22 +20,15 @@ type Config struct {
 	MinecraftDiscordMessengerChannelID string
 	ServerStatusChannelID              string
 	DatabaseConfigPath                 string
-	MemberRoleID					   string
-	GuildID							   string
-}
-
-type MinecraftServerStatus struct {
-	TPS         int
-	PlayerCount int
+	MemberRoleID                       string
+	GuildID                            string
 }
 
 type App struct {
 	Config         Config
 	DiscordSession *discordgo.Session
-	MinecraftConn  net.Conn
-	DatabaseConn   *sql.DB
+	MinecraftConn  *tcpbridge.Client
 	Commands       []*discordgo.ApplicationCommand
-	// minecraftServerStatus MinecraftServerStatus // TODO: add this, easier to manage and formatting is nice :D
 }
 
 // TODO: Fuck den här, vi måste lösa det på nått bättre sätt sen
@@ -84,8 +78,8 @@ func (a *App) loadConfig() error {
 		ServerStatusChannelID:              os.Getenv("ServerStatusChannelID"),
 		MinecraftAddress:                   os.Getenv("MinecraftAddress"),
 		DatabaseConfigPath:                 os.Getenv("DatabaseConfigPath"),
-		MemberRoleID:                 		os.Getenv("MemberRoleID"),
-		GuildID:                			os.Getenv("GuildID"),
+		MemberRoleID:                       os.Getenv("MemberRoleID"),
+		GuildID:                            os.Getenv("GuildID"),
 	}
 
 	if a.Config.DiscordToken == "" {
@@ -111,15 +105,31 @@ func (a *App) connectToServices() error {
 		return fmt.Errorf("cannot open Discord session: %w", err)
 	}
 
-	a.InitializeDatabase()
+	db.InitializeDatabase(a.Config.DatabaseConfigPath)
 
 	// Connect to Minecraft server
-	a.MinecraftConn, err = net.Dial("tcp", a.Config.MinecraftAddress)
-	if err != nil {
-		return fmt.Errorf("failed to connect to Minecraft mod socket: %w", err)
+	a.MinecraftConn = tcpbridge.New(a.Config.MinecraftAddress, tcpbridge.Options{}) //, tcpbridge.Options{Log: log.New(os.Stdout, "tcpbridge: ", log.LstdFlags)})
+	ctx := context.Background()
+	a.MinecraftConn.Start(ctx)
+	st := a.MinecraftConn.Status()
+	if !st.Connected && st.BreakerState != tcpbridge.BreakerClosed {
+		return fmt.Errorf("failed to connect to Minecraft mod socket: %w", tcpbridge.ErrUnavailable)
 	}
 	log.Printf("Connected to Minecraft mod socket on %s", a.Config.MinecraftAddress)
-
+	// _, events, _ := a.MinecraftConn.Subscribe(256)
+	// // TODO: handle events before merge
+	// go func() {
+	// 	for evt := range events {
+	// 		switch evt.Topic {
+	// 		case "chat": // relay to a Discord channel
+	// 		case "join": // post a join embed
+	// 		case "leave":
+	// 		case "status":
+	// 		case "lifecycle":
+	// 		}
+	// 		log.Printf("Got event from tcpbridge: topic: {%s} body: {%s}", evt.Topic, string(evt.Body))
+	// 	}
+	// }()
 	return nil
 }
 
@@ -150,9 +160,8 @@ func (a *App) shutdown() {
 	if a.MinecraftConn != nil {
 		a.MinecraftConn.Close()
 	}
-	if a.DatabaseConn != nil {
-		a.CloseDatabase()
-	}
+
+	db.Close()
 }
 
 func onApplicationCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
@@ -190,7 +199,8 @@ func (a *App) onDiscordMessage(s *discordgo.Session, m *discordgo.MessageCreate)
 
 		msg := fmt.Sprintf("[Discord] %s: %s", m.Author.Username, m.Content)
 
-		_, err := fmt.Fprintln(a.MinecraftConn, msg)
+		ctx := context.Background()
+		_, err := a.MinecraftConn.Send(ctx, []byte(msg))
 		if err != nil {
 			log.Printf("Error sending to Minecraft mod: %v", err)
 		} else {
