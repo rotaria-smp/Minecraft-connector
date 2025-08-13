@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"limpan/rotaria-bot/entities"
 	"net"
 	"strings"
 	"sync"
@@ -94,7 +95,7 @@ type Status struct {
 
 // Event represents an unsolicited message pushed by the server.
 type Event struct {
-	Topic string
+	Topic entities.Topic
 	Body  []byte
 }
 
