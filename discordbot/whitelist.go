@@ -141,7 +141,7 @@ func (a *App) onWhitelistModalSubmitted(s *discordgo.Session, i *discordgo.Inter
 			s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 				Type: discordgo.InteractionResponseChannelMessageWithSource,
 				Data: &discordgo.InteractionResponseData{
-					Content: fmt.Sprintf("❌ Wrong minecraft username idiot `%s`.", minecraftUsername),
+					Content: fmt.Sprintf("❌ Could not find Minecraft account `%s`. Please ensure the username is spelled correctly", minecraftUsername),
 					Flags:   discordgo.MessageFlagsEphemeral,
 				},
 			})
