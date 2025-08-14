@@ -37,34 +37,29 @@ func (a *App) readMinecraftMessages() {
 		case entities.TopicChat:
 			log.Println("Status update received:", body)
 
-			// Find the username part ending at the first ">"
-			usernameEnd := strings.Index(body, ">")
+	usernameEnd := strings.Index(body, ">")
 			if usernameEnd == -1 {
-				// No username detected, just send the raw message
-				log.Printf("Received from Minecraft: %s", body)
-				_, err := a.DiscordSession.ChannelMessageSend(a.Config.MinecraftDiscordMessengerChannelID, body)
-				if err != nil {
+				log.Printf("Received from Minecraft (no '>'): %s", body)
+				if _, err := a.DiscordSession.ChannelMessageSend(a.Config.MinecraftDiscordMessengerChannelID, strings.TrimSpace(body)); err != nil {
 					log.Printf("Error sending message to Discord: %v", err)
 				}
 				continue
 			}
 
-			username := strings.TrimSpace(body[:usernameEnd+1]) // includes ">"
-			content := strings.TrimSpace(body[usernameEnd+1:])  // after ">"
+			username := strings.TrimSpace(body[:usernameEnd+1])
+			content := strings.TrimSpace(body[usernameEnd+1:])
 
-			// Remove literal{...} if present (closing brace optional)
 			if strings.HasPrefix(content, "literal{") {
 				content = strings.TrimPrefix(content, "literal{")
-				if strings.HasSuffix(content, "}") {
-					content = strings.TrimSuffix(content, "}")
+				if closeIdx := strings.Index(content, "}"); closeIdx != -1 {
+					content = content[:closeIdx]
 				}
 				content = strings.TrimSpace(content)
 			}
 
 			cleanedMessage := fmt.Sprintf("%s %s", username, content)
-			log.Printf("Received from Minecraft: %s", cleanedMessage)
-			_, err := a.DiscordSession.ChannelMessageSend(a.Config.MinecraftDiscordMessengerChannelID, cleanedMessage)
-			if err != nil {
+			log.Printf("Received from Minecraft (cleaned): %s", cleanedMessage)
+			if _, err := a.DiscordSession.ChannelMessageSend(a.Config.MinecraftDiscordMessengerChannelID, cleanedMessage); err != nil {
 				log.Printf("Error sending message to Discord: %v", err)
 			}
 
