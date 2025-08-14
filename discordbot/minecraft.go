@@ -15,7 +15,6 @@ func (a *App) readMinecraftMessages() {
 		return
 	}
 
-	// Subscribe for events from tcpbridge
 	_, events, cancel := a.MinecraftConn.Subscribe(128)
 	defer cancel()
 
@@ -37,35 +36,20 @@ func (a *App) readMinecraftMessages() {
 		case entities.TopicChat:
 			log.Println("Status update received:", body)
 
-			gt1 := strings.Index(body, ">")
-			if gt1 == -1 {
-				log.Printf("Received from Minecraft (no '>'): %s", body)
-				if _, err := a.DiscordSession.ChannelMessageSend(a.Config.MinecraftDiscordMessengerChannelID, strings.TrimSpace(body)); err != nil {
-					log.Printf("Error sending message to Discord: %v", err)
+			username := ""
+			content := body
+			if strings.HasPrefix(body, "<") {
+				endIdx := strings.Index(body, ">")
+				if endIdx != -1 {
+					username = body[:endIdx+1]
+					content = strings.TrimSpace(body[endIdx+1:])
 				}
-				continue
-			}
-			gt2 := strings.Index(body[gt1+1:], ">")
-			if gt2 == -1 {
-				gt2 = gt1
-			} else {
-				gt2 = gt1 + 1 + gt2
 			}
 
-			username := strings.TrimSpace(body[:gt2+1])
-			content := strings.TrimSpace(body[gt2+1:])
+			fullMessage := fmt.Sprintf("%s %s", username, content)
 
-			if strings.HasPrefix(content, "literal{") {
-				content = strings.TrimPrefix(content, "literal{")
-				if closeIdx := strings.Index(content, "}"); closeIdx != -1 {
-					content = content[:closeIdx]
-				}
-				content = strings.TrimSpace(content)
-			}
-
-			cleanedMessage := fmt.Sprintf("%s %s", username, content)
-			log.Printf("Received from Minecraft (cleaned): %s", cleanedMessage)
-			if _, err := a.DiscordSession.ChannelMessageSend(a.Config.MinecraftDiscordMessengerChannelID, cleanedMessage); err != nil {
+			log.Printf("Received from Minecraft: %s", fullMessage)
+			if _, err := a.DiscordSession.ChannelMessageSend(a.Config.MinecraftDiscordMessengerChannelID, fullMessage); err != nil {
 				log.Printf("Error sending message to Discord: %v", err)
 			}
 
@@ -76,7 +60,6 @@ func (a *App) readMinecraftMessages() {
 				log.Println("Status updated:", latestStatus)
 				a.updateBotPresence(latestStatus)
 				a.setVoiceChannelStatus(a.Config.ServerStatusChannelID, latestStatus)
-				continue
 			}
 
 		default:
@@ -84,6 +67,7 @@ func (a *App) readMinecraftMessages() {
 		}
 	}
 }
+
 
 
 func (a *App) updateBotPresence(status string) {
