@@ -37,17 +37,23 @@ func (a *App) readMinecraftMessages() {
 		case entities.TopicChat:
 			log.Println("Status update received:", body)
 
-	usernameEnd := strings.Index(body, ">")
-			if usernameEnd == -1 {
+			gt1 := strings.Index(body, ">")
+			if gt1 == -1 {
 				log.Printf("Received from Minecraft (no '>'): %s", body)
 				if _, err := a.DiscordSession.ChannelMessageSend(a.Config.MinecraftDiscordMessengerChannelID, strings.TrimSpace(body)); err != nil {
 					log.Printf("Error sending message to Discord: %v", err)
 				}
 				continue
 			}
+			gt2 := strings.Index(body[gt1+1:], ">")
+			if gt2 == -1 {
+				gt2 = gt1
+			} else {
+				gt2 = gt1 + 1 + gt2
+			}
 
-			username := strings.TrimSpace(body[:usernameEnd+1])
-			content := strings.TrimSpace(body[usernameEnd+1:])
+			username := strings.TrimSpace(body[:gt2+1])
+			content := strings.TrimSpace(body[gt2+1:])
 
 			if strings.HasPrefix(content, "literal{") {
 				content = strings.TrimPrefix(content, "literal{")
@@ -72,11 +78,13 @@ func (a *App) readMinecraftMessages() {
 				a.setVoiceChannelStatus(a.Config.ServerStatusChannelID, latestStatus)
 				continue
 			}
+
 		default:
 			log.Println("Unknown topic:", topic)
 		}
 	}
 }
+
 
 func (a *App) updateBotPresence(status string) {
 	err := a.DiscordSession.UpdateGameStatus(0, status)
