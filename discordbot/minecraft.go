@@ -36,8 +36,11 @@ func (a *App) readMinecraftMessages() {
 			fallthrough
 		case entities.TopicChat:
 			log.Println("Status update received:", body)
-			parts := strings.SplitN(body, " ", 2)
-			if len(parts) < 2 {
+
+			// Find the username part ending at the first ">"
+			usernameEnd := strings.Index(body, ">")
+			if usernameEnd == -1 {
+				// No username detected, just send the raw message
 				log.Printf("Received from Minecraft: %s", body)
 				_, err := a.DiscordSession.ChannelMessageSend(a.Config.MinecraftDiscordMessengerChannelID, body)
 				if err != nil {
@@ -46,11 +49,17 @@ func (a *App) readMinecraftMessages() {
 				continue
 			}
 
-			username := parts[0]
-			content := parts[1]
-			content = strings.TrimPrefix(content, "literal{")
-			content = strings.TrimSuffix(content, "}")
-			content = strings.TrimSpace(content)
+			username := strings.TrimSpace(body[:usernameEnd+1]) // includes ">"
+			content := strings.TrimSpace(body[usernameEnd+1:])  // after ">"
+
+			// Remove literal{...} if present (closing brace optional)
+			if strings.HasPrefix(content, "literal{") {
+				content = strings.TrimPrefix(content, "literal{")
+				if strings.HasSuffix(content, "}") {
+					content = strings.TrimSuffix(content, "}")
+				}
+				content = strings.TrimSpace(content)
+			}
 
 			cleanedMessage := fmt.Sprintf("%s %s", username, content)
 			log.Printf("Received from Minecraft: %s", cleanedMessage)
@@ -58,6 +67,7 @@ func (a *App) readMinecraftMessages() {
 			if err != nil {
 				log.Printf("Error sending message to Discord: %v", err)
 			}
+
 		case entities.TopicStatus:
 			log.Println("Chat message received:", body)
 			if strings.HasPrefix(body, "[UPDATE]") {
