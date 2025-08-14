@@ -10,7 +10,7 @@ public class chatHandler {
         ServerPlayer player = event.getPlayer();
         String message = String.format("<%s> %s",
                 player.getDisplayName().getString(),
-                event.getMessage());
+                event.getMessage().getString());
         Connector.bridge.sendToDiscord(message);
     }
 }

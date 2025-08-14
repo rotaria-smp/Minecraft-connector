@@ -46,21 +46,10 @@ func (a *App) readMinecraftMessages() {
 				}
 			}
 
-			if strings.HasPrefix(content, "literal{") {
-				content = strings.TrimPrefix(content, "literal{")
-				if closeIdx := strings.Index(content, "}"); closeIdx != -1 {
-					content = content[:closeIdx]
-				}
-				content = strings.TrimSpace(content)
-			}
+			fullMessage := fmt.Sprintf("%s %s", username, content)
 
-			cleanedMessage := content
-			if username != "" {
-				cleanedMessage = fmt.Sprintf("%s %s", username, content)
-			}
-
-			log.Printf("Received from Minecraft (cleaned): %s", cleanedMessage)
-			if _, err := a.DiscordSession.ChannelMessageSend(a.Config.MinecraftDiscordMessengerChannelID, cleanedMessage); err != nil {
+			log.Printf("Received from Minecraft: %s", fullMessage)
+			if _, err := a.DiscordSession.ChannelMessageSend(a.Config.MinecraftDiscordMessengerChannelID, fullMessage); err != nil {
 				log.Printf("Error sending message to Discord: %v", err)
 			}
 
