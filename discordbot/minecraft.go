@@ -4,13 +4,10 @@ import (
 	"fmt"
 	"limpan/rotaria-bot/entities"
 	"log"
-	"regexp"
 	"strings"
 
 	"github.com/bwmarrin/discordgo"
 )
-
-var literalRe = regexp.MustCompile(`literal\{([^}]*)\}`)
 
 func (a *App) readMinecraftMessages() {
 	if a.MinecraftConn == nil {
@@ -31,11 +28,13 @@ func (a *App) readMinecraftMessages() {
 		}
 
 		switch topic {
-		case entities.TopicLifecycle,
-			entities.TopicJoin,
-			entities.TopicLeave,
-			entities.TopicChat:
-
+		case entities.TopicLifecycle:
+			fallthrough
+		case entities.TopicJoin:
+			fallthrough
+		case entities.TopicLeave:
+			fallthrough
+		case entities.TopicChat:
 			log.Println("Status update received:", body)
 			parts := strings.SplitN(body, " ", 2)
 			if len(parts) < 2 {
@@ -49,12 +48,8 @@ func (a *App) readMinecraftMessages() {
 
 			username := parts[0]
 			content := parts[1]
-
-			// Clean literal{...} if present
-			if matches := literalRe.FindStringSubmatch(content); len(matches) > 1 {
-				content = matches[1] // extract inside braces
-			}
-
+			content = strings.TrimPrefix(content, "literal{")
+			content = strings.TrimSuffix(content, "}")
 			content = strings.TrimSpace(content)
 
 			cleanedMessage := fmt.Sprintf("%s %s", username, content)
@@ -63,7 +58,6 @@ func (a *App) readMinecraftMessages() {
 			if err != nil {
 				log.Printf("Error sending message to Discord: %v", err)
 			}
-
 		case entities.TopicStatus:
 			log.Println("Chat message received:", body)
 			if strings.HasPrefix(body, "[UPDATE]") {
