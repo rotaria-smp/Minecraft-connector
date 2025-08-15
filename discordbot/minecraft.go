@@ -20,7 +20,7 @@ func (a *App) readMinecraftMessages() {
 	_, events, cancel := a.MinecraftConn.Subscribe(8192)
 	defer cancel()
 
-	out := make(chan string, 2048)
+	out := make(chan string, 8192)
 	go func() {
 		tokens := make(chan struct{}, 5)
 		for i := 0; i < cap(tokens); i++ {
