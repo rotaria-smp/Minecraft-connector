@@ -53,11 +53,13 @@ func (a *App) readMinecraftMessages() {
 					content = strings.TrimSpace(body[endIdx+1:])
 				}
 			}
+
 			fullMessage := fmt.Sprintf("%s %s", username, content)
-			msgChan <- fullMessage 
+			log.Println("Chat message received:", fullMessage)
+			msgChan <- fullMessage
 
 		case entities.TopicStatus:
-			log.Println("Chat message received:", body)
+			log.Println("Topic status received:", body)
 			if strings.HasPrefix(body, "[UPDATE]") {
 				latestStatus := strings.TrimPrefix(body, "[UPDATE] ")
 				log.Println("Status updated:", latestStatus)
