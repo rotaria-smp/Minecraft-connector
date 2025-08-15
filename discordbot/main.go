@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"sync/atomic"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/joho/godotenv"
@@ -29,6 +30,16 @@ type App struct {
 	DiscordSession *discordgo.Session
 	MinecraftConn  *tcpbridge.Client
 	Commands       []*discordgo.ApplicationCommand
+
+	// status workers
+	statusCh   chan string
+	presenceCh chan string
+
+	// internal memory for dedupe/throttle
+	lastChannelName atomic.Value // string
+	lastChannelEdit atomic.Value // time.Time
+	lastPresence    atomic.Value // string
+	lastPresenceAt  atomic.Value // time.Time
 }
 
 // TODO: Fuck den här, vi måste lösa det på nått bättre sätt sen

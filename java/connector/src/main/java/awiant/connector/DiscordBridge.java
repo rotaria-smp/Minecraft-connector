@@ -175,7 +175,8 @@ public class DiscordBridge {
         if (s == null) return;
         String str = new String(body, StandardCharsets.UTF_8);
         // EVTs go to the normal queue; may be dropped when too full
-        s.enqueue(json("type","EVT","topic",topic,"body",str));
+        s.enqueue(json("type", "EVT", "topic", topic, "body", str));
+        Connector.LOGGER.debug("send EVT (id={}) topic={} body={}", s.id, topic, str);
     }
 
     public boolean isConnected() {
