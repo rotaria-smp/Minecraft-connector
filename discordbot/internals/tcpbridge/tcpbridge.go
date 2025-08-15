@@ -31,19 +31,17 @@ var (
 	ErrBadFrame    = errors.New("tcpbridge: bad frame")
 )
 
-// Options controls client behavior. Reasonable defaults are applied in New().
 type Options struct {
-	DialTimeout         time.Duration // default 3s
-	ReadTimeout         time.Duration // per read; default 10s
-	WriteTimeout        time.Duration // per write; default 5s
-	HeartbeatInterval   time.Duration // default 5s
-	HeartbeatTimeout    time.Duration // expect PONG within; default 2s
-	ReconnectMaxBackoff time.Duration // default 30s
-	CommandTimeout      time.Duration // default 10s
+	DialTimeout         time.Duration
+	ReadTimeout         time.Duration
+	WriteTimeout        time.Duration
+	HeartbeatInterval   time.Duration
+	HeartbeatTimeout    time.Duration
+	ReconnectMaxBackoff time.Duration
+	CommandTimeout      time.Duration
 
-	// Circuit breaker (simple built-in)
-	BreakerFailures int           // failures before open; default 3
-	BreakerOpenFor  time.Duration // how long to stay open; default 10s
+	BreakerFailures int
+	BreakerOpenFor  time.Duration
 }
 
 func (o *Options) setDefaults() {
@@ -60,7 +58,7 @@ func (o *Options) setDefaults() {
 		o.HeartbeatInterval = 5 * time.Second
 	}
 	if o.HeartbeatTimeout == 0 {
-		o.HeartbeatTimeout = 2 * time.Second
+		o.HeartbeatTimeout = 5 * time.Second
 	}
 	if o.ReconnectMaxBackoff == 0 {
 		o.ReconnectMaxBackoff = 30 * time.Second
@@ -76,7 +74,6 @@ func (o *Options) setDefaults() {
 	}
 }
 
-// BreakerState represents the state of the circuit breaker
 type BreakerState int
 
 const (
@@ -85,15 +82,13 @@ const (
 	BreakerHalfOpen
 )
 
-// Status is a snapshot for /status commands etc.
 type Status struct {
 	Connected     bool
 	BreakerState  BreakerState
 	LastHeartbeat time.Time
-	QueueLen      int // number of in-flight requests
+	QueueLen      int
 }
 
-// Event represents an unsolicited message pushed by the server.
 type Event struct {
 	Topic entities.Topic
 	Body  []byte
@@ -104,7 +99,6 @@ type response struct {
 	err  error
 }
 
-// ndjson message schema
 type message struct {
 	Type  string         `json:"type"`
 	ID    string         `json:"id,omitempty"`
@@ -119,7 +113,7 @@ type Client struct {
 
 	mu   sync.RWMutex
 	conn net.Conn
-	wq   chan []byte // writes are serialized via this channel
+	wq   chan []byte
 
 	pendingMu sync.Mutex
 	pending   map[string]chan response
@@ -131,14 +125,14 @@ type Client struct {
 	healthy    atomic.Bool
 	lastPongNS atomic.Int64
 
-	// simple circuit breaker
 	brMu            sync.Mutex
 	consecFailures  int
 	openUntil       time.Time
 	halfOpenProbeIn bool
 
-	closed atomic.Bool
-	wg     sync.WaitGroup
+	closed  atomic.Bool
+	started atomic.Bool
+	wg      sync.WaitGroup
 }
 
 func New(addr string, opt Options) *Client {
@@ -153,8 +147,10 @@ func New(addr string, opt Options) *Client {
 	return c
 }
 
-// Start runs the connect/reconnect loop until ctx is done.
 func (c *Client) Start(ctx context.Context) {
+	if !c.started.CompareAndSwap(false, true) {
+		return // guard against double start
+	}
 	c.wg.Add(1)
 	go func() {
 		defer c.wg.Done()
@@ -162,29 +158,40 @@ func (c *Client) Start(ctx context.Context) {
 		for ctx.Err() == nil && !c.closed.Load() {
 			conn, err := net.DialTimeout("tcp", c.addr, c.opt.DialTimeout)
 			if err != nil {
-				// backoff with jitter
-				sleep := backoff + time.Duration(randUint32()%500)*time.Millisecond
-				if backoff < c.opt.ReconnectMaxBackoff {
-					backoff *= 2
-					if backoff > c.opt.ReconnectMaxBackoff {
-						backoff = c.opt.ReconnectMaxBackoff
-					}
-				}
-				timer := time.NewTimer(sleep)
-				select {
-				case <-timer.C:
-				case <-ctx.Done():
-					return
-				}
+				// dial failed: standard backoff with jitter
+				sleepWithJitter(&backoff, c.opt.ReconnectMaxBackoff, ctx)
 				continue
 			}
-			backoff = time.Second
+
+			// connection succeeded
 			c.setConn(conn)
-			if err := c.run(ctx, conn); err != nil {
-				// connection ended; loop and reconnect
+			uptimeStart := time.Now()
+			err = c.run(ctx, conn)
+
+			// If it flapped quickly (dropped connection immediately), back off before the next dial to avoid thrash
+			if time.Since(uptimeStart) < time.Second*2 {
+				sleepWithJitter(&backoff, c.opt.ReconnectMaxBackoff, ctx)
+			} else {
+				backoff = time.Second // reset after a stable run
 			}
 		}
 	}()
+}
+
+func sleepWithJitter(backoff *time.Duration, max time.Duration, ctx context.Context) {
+	sleep := *backoff + time.Duration(randUint32()%500)*time.Millisecond
+	if *backoff < max {
+		*backoff *= 2
+		if *backoff > max {
+			*backoff = max
+		}
+	}
+	t := time.NewTimer(sleep)
+	defer t.Stop()
+	select {
+	case <-t.C:
+	case <-ctx.Done():
+	}
 }
 
 func (c *Client) Close() error {
@@ -236,7 +243,6 @@ func (c *Client) run(ctx context.Context, conn net.Conn) error {
 				errs <- err
 				return
 			}
-			// trim CRLF and spaces
 			str := strings.TrimSpace(string(line))
 			if str == "" {
 				continue
@@ -256,16 +262,17 @@ func (c *Client) run(ctx context.Context, conn net.Conn) error {
 			case "EVT":
 				c.broadcast(Event{Topic: m.Topic, Body: []byte(m.Body)})
 			default:
-				// ignore unknown types
+				// ignore unknown
 			}
 		}
 	}()
 
-	// heartbeat monitor
+	// heartbeat monitor (require 2 consecutive misses before closing)
 	go func() {
 		defer c.wg.Done()
 		t := time.NewTicker(c.opt.HeartbeatInterval)
 		defer t.Stop()
+		misses := 0
 		for {
 			select {
 			case <-t.C:
@@ -275,6 +282,11 @@ func (c *Client) run(ctx context.Context, conn net.Conn) error {
 				select {
 				case <-tmr.C:
 					if time.Unix(0, c.lastPongNS.Load()).After(last) {
+						misses = 0
+						continue
+					}
+					misses++
+					if misses < 2 { // be forgiving; try another round
 						continue
 					}
 					_ = conn.Close() // force reconnect
@@ -289,7 +301,6 @@ func (c *Client) run(ctx context.Context, conn net.Conn) error {
 		}
 	}()
 
-	// wait for any error or ctx
 	var err error
 	select {
 	case err = <-errs:
@@ -297,7 +308,6 @@ func (c *Client) run(ctx context.Context, conn net.Conn) error {
 		err = ctx.Err()
 	}
 
-	// tear down
 	c.healthy.Store(false)
 	_ = conn.Close()
 	c.failAllPending(ErrUnavailable)
@@ -323,8 +333,6 @@ func (c *Client) enqueueJSON(m message) {
 	c.enqueue(b)
 }
 
-// Send transmits a command payload and waits for a response body.
-// It returns ErrUnavailable immediately if the connection is down or breaker is open.
 func (c *Client) Send(ctx context.Context, payload []byte) ([]byte, error) {
 	if c.closed.Load() {
 		return nil, ErrClosed
@@ -336,6 +344,7 @@ func (c *Client) Send(ctx context.Context, payload []byte) ([]byte, error) {
 	if c.isBreakerOpen() {
 		return nil, ErrBreakerOpen
 	}
+
 	id := newID()
 	respCh := make(chan response, 1)
 
@@ -343,10 +352,8 @@ func (c *Client) Send(ctx context.Context, payload []byte) ([]byte, error) {
 	c.pending[id] = respCh
 	c.pendingMu.Unlock()
 
-	// send NDJSON CMD
 	c.enqueueJSON(message{Type: "CMD", ID: id, Body: string(payload)})
 
-	// wait
 	tmo := c.opt.CommandTimeout
 	if deadline, ok := ctx.Deadline(); ok {
 		if d := time.Until(deadline); d < tmo {
@@ -402,7 +409,6 @@ func (c *Client) failAllPending(err error) {
 	c.pendingMu.Unlock()
 }
 
-// --- subscriptions for unsolicited events ---
 func (c *Client) Subscribe(buffer int) (id int64, ch <-chan Event, cancel func()) {
 	if buffer <= 0 {
 		buffer = 64
@@ -434,13 +440,11 @@ func (c *Client) broadcast(evt Event) {
 		select {
 		case ch <- evt:
 		default:
-			// drop if subscriber is slow
 		}
 	}
 	c.subsMu.RUnlock()
 }
 
-// Status returns a snapshot of client health.
 func (c *Client) Status() Status {
 	st := Status{}
 	st.Connected = c.healthy.Load()
@@ -460,7 +464,6 @@ func (c *Client) Status() Status {
 	return st
 }
 
-// --- simple circuit breaker helpers ---
 func (c *Client) noteFailure() {
 	c.brMu.Lock()
 	defer c.brMu.Unlock()
@@ -471,9 +474,7 @@ func (c *Client) noteFailure() {
 	}
 }
 
-func (c *Client) noteSuccess() {
-	c.resetBreaker()
-}
+func (c *Client) noteSuccess() { c.resetBreaker() }
 
 func (c *Client) resetBreaker() {
 	c.brMu.Lock()
@@ -490,19 +491,16 @@ func (c *Client) isBreakerOpen() bool {
 	if now.Before(c.openUntil) {
 		return true
 	}
-	// half-open probe: allow a single caller after open window passes; others see open until success/failure
 	if !c.halfOpenProbeIn && !c.openUntil.IsZero() && now.After(c.openUntil) && c.consecFailures >= c.opt.BreakerFailures {
 		c.halfOpenProbeIn = true
 		return false
 	}
 	if c.halfOpenProbeIn {
-		// one probe in flight; other callers still see open
 		return true
 	}
 	return false
 }
 
-// --- utils ---
 func newID() string {
 	var b [16]byte
 	_, _ = rand.Read(b[:])

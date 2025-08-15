@@ -10,8 +10,7 @@ import java.io.*;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 
 public class DiscordBridge {
     private ServerSocket serverSocket;
@@ -46,7 +45,6 @@ public class DiscordBridge {
     }
 
     private synchronized ClientSession replaceClient(Socket s) throws IOException {
-        // Preempt any existing client
         if (session != null) {
             Connector.LOGGER.warn("Preempting existing client (id={}) with new connection", session.id);
             session.stop();
@@ -90,9 +88,8 @@ public class DiscordBridge {
                 String type = m.get("type").getAsString();
                 switch (type) {
                     case "PING":
-                        sess.enqueue(json("type","PONG"));
+                        writeImmediate(sess, json("type","PONG"));
                         break;
-
                     case "CMD": {
                         String id = m.has("id") ? m.get("id").getAsString() : "";
                         String body = m.has("body") ? m.get("body").getAsString() : "";
@@ -107,9 +104,20 @@ public class DiscordBridge {
         } catch (IOException e) {
             Connector.LOGGER.warn("Client IO ended (id={}): {}", sess.id, e.toString());
         } finally {
-            // Only tear down the global session if this handler still owns it
             sess.stop();
             clearIfCurrent(sess);
+        }
+    }
+
+    private void writeImmediate(ClientSession sess, JsonObject m) {
+        try {
+            byte[] bytes = (gson.toJson(m) + "\n").getBytes(StandardCharsets.UTF_8);
+            synchronized (sess.out) {
+                sess.out.write(bytes);
+                sess.out.flush();
+            }
+        } catch (IOException ioe) {
+            Connector.LOGGER.warn("immediate write failed (id={}) : {}", sess.id, ioe.toString());
         }
     }
 
@@ -117,7 +125,7 @@ public class DiscordBridge {
         String cmd = bodyUtf8.trim();
         MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
         if (server == null) {
-            sess.enqueue(json("type","ERR","id",id,"msg","server not ready"));
+            sess.enqueueControl(json("type","ERR","id",id,"msg","server not ready"));
             return;
         }
 
@@ -138,7 +146,6 @@ public class DiscordBridge {
                     server.getPlayerList().broadcastSystemMessage(Component.literal(msg), false);
                     fut.complete("ok");
                 } else {
-                    // Default: treat as plain chat broadcast
                     server.getPlayerList().broadcastSystemMessage(Component.literal(cmd), false);
                     fut.complete("ok");
                 }
@@ -149,28 +156,25 @@ public class DiscordBridge {
 
         try {
             String res = fut.get(5, TimeUnit.SECONDS);
-            sess.enqueue(json("type","RES","id",id,"body",res));
+            // Control path so RES is never stuck behind EVTs
+            sess.enqueueControl(json("type","RES","id",id,"body",res));
         } catch (Exception e) {
             String msg = e.getMessage() != null ? e.getMessage() : "error";
-            sess.enqueue(json("type","ERR","id",id,"msg",msg));
+            sess.enqueueControl(json("type","ERR","id",id,"msg",msg));
         }
     }
 
     // ---- outbound helpers (events + responses)
 
-    // Back-compat: keep name but now emits EVT topic "chat" via NDJSON.
-    public void sendToDiscord(String message) {
-        sendEventString("chat", message);
-    }
+    public void sendToDiscord(String message) { sendEventString("chat", message); }
 
-    public void sendEventString(String topic, String msg) {
-        sendEvent(topic, msg.getBytes(StandardCharsets.UTF_8));
-    }
+    public void sendEventString(String topic, String msg) { sendEvent(topic, msg.getBytes(StandardCharsets.UTF_8)); }
 
     public void sendEvent(String topic, byte[] body) {
         ClientSession s = session;
         if (s == null) return;
         String str = new String(body, StandardCharsets.UTF_8);
+        // EVTs go to the normal queue; may be dropped when too full
         s.enqueue(json("type","EVT","topic",topic,"body",str));
     }
 
@@ -178,8 +182,6 @@ public class DiscordBridge {
         ClientSession s = session;
         return s != null && !s.socket.isClosed() && s.socket.isConnected();
     }
-
-    // ---- utilities
 
     private JsonObject json(Object... kv) {
         JsonObject o = new JsonObject();
@@ -198,8 +200,9 @@ public class DiscordBridge {
         final long id;
         final Socket socket;
         final OutputStream out;
-        final java.util.concurrent.BlockingQueue<String> outbox =
-                new java.util.concurrent.LinkedBlockingQueue<>(10_000);
+        // Separate queues: control (PONG/RES/ERR) and regular EVT
+        final BlockingQueue<String> control = new LinkedBlockingQueue<>(1_000);
+        final BlockingQueue<String> outbox = new LinkedBlockingQueue<>(10_000);
         final Thread writer;
 
         ClientSession(long id, Socket socket) throws IOException {
@@ -213,15 +216,24 @@ public class DiscordBridge {
             this.writer = new Thread(() -> {
                 try {
                     for (;;) {
-                        String line = outbox.take(); // NDJSON line (ends with '\n')
+                        String line = control.poll(); // try control first
+                        if (line == null) {
+                            // wait a short time on regular queue; then re-check control
+                            line = outbox.poll(200, TimeUnit.MILLISECONDS);
+                            if (line == null) {
+                                continue; // loop and poll control again
+                            }
+                        }
                         byte[] bytes = line.getBytes(StandardCharsets.UTF_8);
-                        out.write(bytes);
-                        out.flush();
+                        synchronized (out) {
+                            out.write(bytes);
+                            out.flush();
+                        }
                     }
                 } catch (InterruptedException ie) {
                     Thread.currentThread().interrupt();
                 } catch (IOException ioe) {
-                    Connector.LOGGER.warn("writer IO (id={}): {}", id, ioe.toString());
+                    Connector.LOGGER.warn("writer IO (id={}) : {}", id, ioe.toString());
                 } finally {
                     try { socket.close(); } catch (IOException ignore) {}
                 }
@@ -233,13 +245,27 @@ public class DiscordBridge {
 
         void enqueue(JsonObject m) {
             String line = gson.toJson(m) + "\n";
+            // If EVT queue is near full, drop newest EVT (shed load) to protect control frames
             if (!outbox.offer(line)) {
-                Connector.LOGGER.warn("outbox full; dropping (id={})", id);
+                Connector.LOGGER.warn("outbox full; dropping EVT (id={})", id);
+            }
+        }
+
+        void enqueueControl(JsonObject m) {
+            String line = gson.toJson(m) + "\n";
+            // Control frames should almost never drop; wait briefly if needed
+            try {
+                if (!control.offer(line, 200, TimeUnit.MILLISECONDS)) {
+                    Connector.LOGGER.warn("control queue saturated; dropping control frame (id={})", id);
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
             }
         }
 
         void stop() {
             writer.interrupt();
+            control.clear();
             outbox.clear();
             try { socket.close(); } catch (IOException ignore) {}
         }
