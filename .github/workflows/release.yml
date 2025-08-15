@@ -59,6 +59,7 @@ jobs:
         run: |
           cd discordbot
           go build -ldflags "-X main.Version=${{ steps.gitversion.outputs.informationalVersion }}" -o rotaria-bot
+          chmod +x rotaria-bot
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
