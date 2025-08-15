@@ -20,6 +20,11 @@ public class DiscordBridge {
     private volatile OutputStream eventOut;
     private final int port;
     private final Gson gson = new Gson();
+    private final java.util.concurrent.BlockingQueue<String> outbox =
+            new java.util.concurrent.LinkedBlockingQueue<>(10_000); // tune size as needed
+    private volatile Thread writerThread;
+    private volatile OutputStream writerOut; // writer's private handle (don't use elsewhere)
+
 
     public DiscordBridge(int port) {
         this.port = port;
@@ -46,21 +51,86 @@ public class DiscordBridge {
         }
     }
 
+    private synchronized void startWriterThread(Socket s) throws IOException {
+        stopWriterThread(); // stop any previous writer first
+
+        // Prepare the new output stream and set socket options
+        s.setTcpNoDelay(true);
+        s.setKeepAlive(true);
+        try {
+            s.setSendBufferSize(256 * 1024); // optional, helps with bursts
+        } catch (Exception ignore) {}
+
+        writerOut = s.getOutputStream();
+
+        writerThread = new Thread(() -> {
+            try {
+                final OutputStream o = writerOut; // capture for this generation
+                for (;;) {
+                    // Blocks until there's a line to send; each line already ends with '\n'
+                    String line = outbox.take();
+                    byte[] bytes = line.getBytes(StandardCharsets.UTF_8);
+
+                    // Keep each write+flush atomic to avoid interleaving with future changes
+                    synchronized (this) {
+                        // If a new client replaced us, bail out quietly
+                        if (o != writerOut) break;
+
+                        o.write(bytes);
+                        o.flush();
+                    }
+                }
+            } catch (InterruptedException ie) {
+                // normal shutdown path
+                Thread.currentThread().interrupt();
+            } catch (IOException ioe) {
+                Connector.LOGGER.warn("Writer thread IO ended: {}", ioe.toString());
+                // Do NOT call closeClient() here; the accept loop manages lifecycle.
+            } finally {
+                // Best effort: let this generation's stream go
+                synchronized (this) {
+                    if (writerOut != null) {
+                        try { writerOut.flush(); } catch (IOException ignore) {}
+                    }
+                }
+            }
+        }, "discord-bridge-writer");
+
+        writerThread.setDaemon(true);
+        writerThread.start();
+    }
+
+    private synchronized void stopWriterThread() {
+        Thread wt = writerThread;
+        writerThread = null;
+        // Detach writerOut so any running writer exits if it wakes up
+        writerOut = null;
+
+        if (wt != null) {
+            wt.interrupt();
+            // Don't join() here to avoid blocking server threads
+        }
+        outbox.clear(); // drop stale messages for previous client
+    }
+
     private synchronized void replaceClient(Socket s) throws IOException {
-        closeClient();
+        closeClient();           // shuts down old client + writer
         clientSocket = s;
-        eventOut = s.getOutputStream(); // for EVT broadcasts
+        eventOut = null;         // deprecated: writerOut is authoritative
+        startWriterThread(s);
     }
 
     private synchronized void closeClient() {
+        stopWriterThread();
         try { if (clientSocket != null) clientSocket.close(); } catch (IOException ignore) {}
-        clientSocket = null; eventOut = null;
+        clientSocket = null;
+        eventOut = null;
     }
 
     private void handleClient(Socket s) {
         try (InputStream rin = s.getInputStream();
-            OutputStream rout = s.getOutputStream();
-            BufferedReader hin = new BufferedReader(new InputStreamReader(rin, StandardCharsets.UTF_8))) {
+             OutputStream rout = s.getOutputStream();
+             BufferedReader hin = new BufferedReader(new InputStreamReader(rin, StandardCharsets.UTF_8))) {
 
             for (;;) {
                 String line = hin.readLine();
@@ -77,12 +147,12 @@ public class DiscordBridge {
                 String type = m.get("type").getAsString();
                 switch (type) {
                     case "PING":
-                        writeJson(rout, json("type","PONG"));
+                        enqueueJson(json("type","PONG"));
                         break;
                     case "CMD": {
                         String id = m.has("id") ? m.get("id").getAsString() : "";
                         String body = m.has("body") ? m.get("body").getAsString() : "";
-                        onCommand(rout, id, body);
+                        onCommand(id, body);
                         break;
                     }
                     default:
@@ -96,11 +166,11 @@ public class DiscordBridge {
         }
     }
 
-    private void onCommand(OutputStream rout, String id, String bodyUtf8) {
+    private void onCommand(String id, String bodyUtf8) {
         String cmd = bodyUtf8.trim();
         MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
         if (server == null) {
-            writeJson(rout, json("type","ERR","id",id,"msg","server not ready"));
+            enqueueJson(json("type","ERR","id",id,"msg","server not ready"));
             return;
         }
 
@@ -132,10 +202,10 @@ public class DiscordBridge {
 
         try {
             String res = fut.get(5, TimeUnit.SECONDS);
-            writeJson(rout, json("type","RES","id",id,"body",res));
+            enqueueJson(json("type","RES","id",id,"body",res));
         } catch (Exception e) {
             String msg = e.getMessage() != null ? e.getMessage() : "error";
-            writeJson(rout, json("type","ERR","id",id,"msg",msg));
+            enqueueJson(json("type","ERR","id",id,"msg",msg));
         }
     }
 
@@ -143,28 +213,23 @@ public class DiscordBridge {
 
     // Back-compat: keep name but now emits EVT topic "chat" via NDJSON.
     public void sendToDiscord(String message) {
-      sendEventString("chat", message);
+        sendEventString("chat", message);
     }
 
     public void sendEventString(String topic, String msg) {
-      sendEvent(topic, msg.getBytes(StandardCharsets.UTF_8)); 
+        sendEvent(topic, msg.getBytes(StandardCharsets.UTF_8));
     }
 
     public void sendEvent(String topic, byte[] body) {
-        if (eventOut == null) return;
         String s = new String(body, StandardCharsets.UTF_8);
         JsonObject m = json("type","EVT","topic",topic,"body",s);
-        writeJson(eventOut, m);
+        enqueueJson(m);
     }
 
-    private synchronized void writeJson(OutputStream o, JsonObject m) {
-        try {
-            String line = gson.toJson(m) + "\n";
-            o.write(line.getBytes(StandardCharsets.UTF_8));
-            o.flush();
-        } catch (IOException e) {
-            Connector.LOGGER.error("json write failed", e);
-            closeClient();
+    private void enqueueJson(JsonObject m) {
+        String line = gson.toJson(m) + "\n";
+        if (!outbox.offer(line)) {
+            Connector.LOGGER.warn("Outbox full; dropping message");
         }
     }
 
