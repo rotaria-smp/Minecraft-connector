@@ -15,16 +15,11 @@ import java.util.concurrent.TimeUnit;
 
 public class DiscordBridge {
     private ServerSocket serverSocket;
-    private volatile Socket clientSocket;
-    // Only used for broadcasting EVT JSON lines to the *current* client
-    private volatile OutputStream eventOut;
     private final int port;
     private final Gson gson = new Gson();
-    private final java.util.concurrent.BlockingQueue<String> outbox =
-            new java.util.concurrent.LinkedBlockingQueue<>(10_000); // tune size as needed
-    private volatile Thread writerThread;
-    private volatile OutputStream writerOut; // writer's private handle (don't use elsewhere)
 
+    private final java.util.concurrent.atomic.AtomicLong gen = new java.util.concurrent.atomic.AtomicLong();
+    private volatile ClientSession session; // the single active connection
 
     public DiscordBridge(int port) {
         this.port = port;
@@ -41,136 +36,88 @@ public class DiscordBridge {
             Connector.LOGGER.info("Discord bridge (NDJSON) listening on port {}", port);
             while (!serverSocket.isClosed()) {
                 Socket s = serverSocket.accept();
-                s.setTcpNoDelay(true);
-                replaceClient(s);
                 Connector.LOGGER.info("accepted {}", s);
-                new Thread(() -> handleClient(s), "discord-bridge-client").start();
+                ClientSession newSession = replaceClient(s);
+                new Thread(() -> handleClient(newSession), "discord-bridge-client-" + newSession.id).start();
             }
         } catch (IOException e) {
             Connector.LOGGER.error("Error in Discord bridge", e);
         }
     }
 
-    private synchronized void startWriterThread(Socket s) throws IOException {
-        stopWriterThread(); // stop any previous writer first
-
-        // Prepare the new output stream and set socket options
-        s.setTcpNoDelay(true);
-        s.setKeepAlive(true);
-        try {
-            s.setSendBufferSize(256 * 1024); // optional, helps with bursts
-        } catch (Exception ignore) {}
-
-        writerOut = s.getOutputStream();
-
-        writerThread = new Thread(() -> {
-            try {
-                final OutputStream o = writerOut; // capture for this generation
-                for (;;) {
-                    // Blocks until there's a line to send; each line already ends with '\n'
-                    String line = outbox.take();
-                    byte[] bytes = line.getBytes(StandardCharsets.UTF_8);
-
-                    // Keep each write+flush atomic to avoid interleaving with future changes
-                    synchronized (this) {
-                        // If a new client replaced us, bail out quietly
-                        if (o != writerOut) break;
-
-                        o.write(bytes);
-                        o.flush();
-                    }
-                }
-            } catch (InterruptedException ie) {
-                // normal shutdown path
-                Thread.currentThread().interrupt();
-            } catch (IOException ioe) {
-                Connector.LOGGER.warn("Writer thread IO ended: {}", ioe.toString());
-                // Do NOT call closeClient() here; the accept loop manages lifecycle.
-            } finally {
-                // Best effort: let this generation's stream go
-                synchronized (this) {
-                    if (writerOut != null) {
-                        try { writerOut.flush(); } catch (IOException ignore) {}
-                    }
-                }
-            }
-        }, "discord-bridge-writer");
-
-        writerThread.setDaemon(true);
-        writerThread.start();
-    }
-
-    private synchronized void stopWriterThread() {
-        Thread wt = writerThread;
-        writerThread = null;
-        // Detach writerOut so any running writer exits if it wakes up
-        writerOut = null;
-
-        if (wt != null) {
-            wt.interrupt();
-            // Don't join() here to avoid blocking server threads
+    private synchronized ClientSession replaceClient(Socket s) throws IOException {
+        // Preempt any existing client
+        if (session != null) {
+            Connector.LOGGER.warn("Preempting existing client (id={}) with new connection", session.id);
+            session.stop();
         }
-        outbox.clear(); // drop stale messages for previous client
+        session = new ClientSession(gen.incrementAndGet(), s);
+        return session;
     }
 
-    private synchronized void replaceClient(Socket s) throws IOException {
-        closeClient();           // shuts down old client + writer
-        clientSocket = s;
-        eventOut = null;         // deprecated: writerOut is authoritative
-        startWriterThread(s);
+    private synchronized void clearIfCurrent(ClientSession maybeCurrent) {
+        if (session == maybeCurrent) {
+            session = null;
+        }
     }
 
-    private synchronized void closeClient() {
-        stopWriterThread();
-        try { if (clientSocket != null) clientSocket.close(); } catch (IOException ignore) {}
-        clientSocket = null;
-        eventOut = null;
-    }
-
-    private void handleClient(Socket s) {
-        try (InputStream rin = s.getInputStream();
-             OutputStream rout = s.getOutputStream();
+    private void handleClient(ClientSession sess) {
+        try (InputStream rin = sess.socket.getInputStream();
              BufferedReader hin = new BufferedReader(new InputStreamReader(rin, StandardCharsets.UTF_8))) {
 
             for (;;) {
                 String line = hin.readLine();
-                if (line == null) break;
+                if (line == null) {
+                    Connector.LOGGER.info("client EOF (id={})", sess.id);
+                    break;
+                }
                 line = line.trim();
                 if (line.isEmpty()) continue;
 
-                Connector.LOGGER.debug("recv json: {}", line);
-                JsonObject m = gson.fromJson(line, JsonObject.class);
-                if (m == null || !m.has("type")) {
-                    Connector.LOGGER.warn("bad json frame: {}", line);
+                Connector.LOGGER.debug("recv json (id={}): {}", sess.id, line);
+                JsonObject m;
+                try {
+                    m = gson.fromJson(line, JsonObject.class);
+                } catch (com.google.gson.JsonSyntaxException ex) {
+                    Connector.LOGGER.warn("bad json syntax (id={}): {}", sess.id, line);
                     continue;
                 }
+                if (m == null || !m.has("type")) {
+                    Connector.LOGGER.warn("bad json frame (id={}): {}", sess.id, line);
+                    continue;
+                }
+
                 String type = m.get("type").getAsString();
                 switch (type) {
                     case "PING":
-                        enqueueJson(json("type","PONG"));
+                        sess.enqueue(json("type","PONG"));
                         break;
+
                     case "CMD": {
                         String id = m.has("id") ? m.get("id").getAsString() : "";
                         String body = m.has("body") ? m.get("body").getAsString() : "";
-                        onCommand(id, body);
+                        onCommand(sess, id, body);
                         break;
                     }
+
                     default:
-                        Connector.LOGGER.warn("unknown frame type: {}", type);
+                        Connector.LOGGER.warn("unknown frame type (id={}): {}", sess.id, type);
                 }
             }
         } catch (IOException e) {
-            Connector.LOGGER.warn("Client IO ended: {}", e.toString());
+            Connector.LOGGER.warn("Client IO ended (id={}): {}", sess.id, e.toString());
         } finally {
-            closeClient();
+            // Only tear down the global session if this handler still owns it
+            sess.stop();
+            clearIfCurrent(sess);
         }
     }
 
-    private void onCommand(String id, String bodyUtf8) {
+    private void onCommand(ClientSession sess, String id, String bodyUtf8) {
         String cmd = bodyUtf8.trim();
         MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
         if (server == null) {
-            enqueueJson(json("type","ERR","id",id,"msg","server not ready"));
+            sess.enqueue(json("type","ERR","id",id,"msg","server not ready"));
             return;
         }
 
@@ -202,10 +149,10 @@ public class DiscordBridge {
 
         try {
             String res = fut.get(5, TimeUnit.SECONDS);
-            enqueueJson(json("type","RES","id",id,"body",res));
+            sess.enqueue(json("type","RES","id",id,"body",res));
         } catch (Exception e) {
             String msg = e.getMessage() != null ? e.getMessage() : "error";
-            enqueueJson(json("type","ERR","id",id,"msg",msg));
+            sess.enqueue(json("type","ERR","id",id,"msg",msg));
         }
     }
 
@@ -221,23 +168,24 @@ public class DiscordBridge {
     }
 
     public void sendEvent(String topic, byte[] body) {
-        String s = new String(body, StandardCharsets.UTF_8);
-        JsonObject m = json("type","EVT","topic",topic,"body",s);
-        enqueueJson(m);
+        ClientSession s = session;
+        if (s == null) return;
+        String str = new String(body, StandardCharsets.UTF_8);
+        s.enqueue(json("type","EVT","topic",topic,"body",str));
     }
 
-    private void enqueueJson(JsonObject m) {
-        String line = gson.toJson(m) + "\n";
-        if (!outbox.offer(line)) {
-            Connector.LOGGER.warn("Outbox full; dropping message");
-        }
+    public boolean isConnected() {
+        ClientSession s = session;
+        return s != null && !s.socket.isClosed() && s.socket.isConnected();
     }
+
+    // ---- utilities
 
     private JsonObject json(Object... kv) {
         JsonObject o = new JsonObject();
         for (int i = 0; i + 1 < kv.length; i += 2) {
             String k = String.valueOf(kv[i]);
-            Object v = kv[i+1];
+            Object v = kv[i + 1];
             if (v == null) { o.addProperty(k, (String) null); continue; }
             if (v instanceof Number n) o.addProperty(k, n);
             else if (v instanceof Boolean b) o.addProperty(k, b);
@@ -246,7 +194,54 @@ public class DiscordBridge {
         return o;
     }
 
-    public boolean isConnected() {
-        return clientSocket != null && clientSocket.isConnected() && !clientSocket.isClosed();
+    private final class ClientSession {
+        final long id;
+        final Socket socket;
+        final OutputStream out;
+        final java.util.concurrent.BlockingQueue<String> outbox =
+                new java.util.concurrent.LinkedBlockingQueue<>(10_000);
+        final Thread writer;
+
+        ClientSession(long id, Socket socket) throws IOException {
+            this.id = id;
+            this.socket = socket;
+            this.socket.setTcpNoDelay(true);
+            this.socket.setKeepAlive(true);
+            try { this.socket.setSendBufferSize(256 * 1024); } catch (Exception ignore) {}
+            this.out = socket.getOutputStream();
+
+            this.writer = new Thread(() -> {
+                try {
+                    for (;;) {
+                        String line = outbox.take(); // NDJSON line (ends with '\n')
+                        byte[] bytes = line.getBytes(StandardCharsets.UTF_8);
+                        out.write(bytes);
+                        out.flush();
+                    }
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                } catch (IOException ioe) {
+                    Connector.LOGGER.warn("writer IO (id={}): {}", id, ioe.toString());
+                } finally {
+                    try { socket.close(); } catch (IOException ignore) {}
+                }
+            }, "discord-bridge-writer-" + id);
+
+            this.writer.setDaemon(true);
+            this.writer.start();
+        }
+
+        void enqueue(JsonObject m) {
+            String line = gson.toJson(m) + "\n";
+            if (!outbox.offer(line)) {
+                Connector.LOGGER.warn("outbox full; dropping (id={})", id);
+            }
+        }
+
+        void stop() {
+            writer.interrupt();
+            outbox.clear();
+            try { socket.close(); } catch (IOException ignore) {}
+        }
     }
 }
