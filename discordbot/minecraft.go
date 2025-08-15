@@ -5,6 +5,7 @@ import (
 	"limpan/rotaria-bot/entities"
 	"log"
 	"strings"
+	"time"
 
 	"github.com/bwmarrin/discordgo"
 )
@@ -15,36 +16,62 @@ func (a *App) readMinecraftMessages() {
 		return
 	}
 
-	msgChan := make(chan string, 200)
+	// Subscribe to Minecraft events
+	_, events, cancel := a.MinecraftConn.Subscribe(4096)
+	defer cancel()
 
+	out := make(chan string, 2048)
 	go func() {
-		for msg := range msgChan {
-			go func(m string) {
+		tokens := make(chan struct{}, 5)
+		for i := 0; i < cap(tokens); i++ {
+			tokens <- struct{}{}
+		}
+		refill := time.NewTicker(1 * time.Second)
+		defer refill.Stop()
+
+		for {
+			select {
+			case <-refill.C:
+				select {
+				case tokens <- struct{}{}:
+				default:
+				}
+			case m, ok := <-out:
+				if !ok {
+					return
+				}
+				<-tokens
 				if _, err := a.DiscordSession.ChannelMessageSend(a.Config.MinecraftDiscordMessengerChannelID, m); err != nil {
 					log.Printf("Error sending message to Discord: %v", err)
 				}
-			}(msg)
+			}
 		}
 	}()
 
-	_, events, cancel := a.MinecraftConn.Subscribe(8192)
-	defer cancel()
-
-	for evt := range events {
-		topic := evt.Topic
-		body := string(evt.Body)
+	for {
+		evt, ok := <-events
+		if !ok {
+			close(out)
+			return
+		}
+		body := strings.TrimSpace(string(evt.Body))
 		if body == "" {
 			continue
 		}
 
-		switch topic {
-		case entities.TopicLifecycle:
-			fallthrough
-		case entities.TopicJoin:
-			fallthrough
-		case entities.TopicLeave:
-			fallthrough
-		case entities.TopicChat:
+		log.Printf("Received from Minecraft: topic=%v body=%q", evt.Topic, body)
+
+		// Update presence/voice
+		if evt.Topic == entities.TopicStatus {
+			latest := strings.TrimPrefix(body, "[UPDATE] ")
+			a.updateBotPresence(latest)
+			a.setVoiceChannelStatus(a.Config.ServerStatusChannelID, latest)
+			continue
+		}
+
+		// Everything else goes to chat
+		var msg string
+		if evt.Topic == entities.TopicChat {
 			username := ""
 			content := body
 			if strings.HasPrefix(body, "<") {
@@ -53,22 +80,13 @@ func (a *App) readMinecraftMessages() {
 					content = strings.TrimSpace(body[endIdx+1:])
 				}
 			}
+			msg = strings.TrimSpace(fmt.Sprintf("%s %s", username, content))
+		} else {
+			msg = body
+		}
 
-			fullMessage := fmt.Sprintf("%s %s", username, content)
-			log.Println("Chat message received:", fullMessage)
-			msgChan <- fullMessage
-
-		case entities.TopicStatus:
-			log.Println("Topic status received:", body)
-			if strings.HasPrefix(body, "[UPDATE]") {
-				latestStatus := strings.TrimPrefix(body, "[UPDATE] ")
-				log.Println("Status updated:", latestStatus)
-				a.updateBotPresence(latestStatus)
-				a.setVoiceChannelStatus(a.Config.ServerStatusChannelID, latestStatus)
-			}
-
-		default:
-			log.Println("Unknown topic:", topic)
+		if msg != "" {
+			out <- msg
 		}
 	}
 }
