@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"limpan/rotaria-bot/entities"
+	"log"
 	"net"
 	"strings"
 	"sync"
@@ -445,22 +446,8 @@ func (c *Client) broadcast(evt Event) {
 	for _, ch := range c.subs {
 		select {
 		case ch <- evt:
-			// delivered
 		default:
-			// give the consumer a brief chance to catch up
-			select {
-			case ch <- evt:
-			case <-time.After(250 * time.Millisecond):
-				// still full: evict one oldest, then try once more
-				select {
-				case <-ch:
-				default:
-				}
-				select {
-				case ch <- evt:
-				default:
-				}
-			}
+			log.Printf("tcpbridge: slow subscriber; dropping evt")
 		}
 	}
 	c.subsMu.RUnlock()
