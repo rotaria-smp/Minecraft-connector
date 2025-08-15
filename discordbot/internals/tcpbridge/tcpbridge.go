@@ -168,7 +168,7 @@ func (c *Client) Start(ctx context.Context) {
 			uptimeStart := time.Now()
 			err = c.run(ctx, conn)
 
-			// If it flapped quickly, back off before the next dial to avoid thrash
+			// If it flapped quickly (dropped connection immediately), back off before the next dial to avoid thrash
 			if time.Since(uptimeStart) < time.Second*2 {
 				sleepWithJitter(&backoff, c.opt.ReconnectMaxBackoff, ctx)
 			} else {
