@@ -4,8 +4,9 @@ import (
 	"context"
 	"fmt"
 	"limpan/rotaria-bot/internals/db"
+	"limpan/rotaria-bot/internals/logging"
 	"limpan/rotaria-bot/internals/tcpbridge"
-	"log"
+	"log/slog"
 	"os"
 	"os/signal"
 
@@ -29,6 +30,7 @@ type App struct {
 	DiscordSession *discordgo.Session
 	MinecraftConn  *tcpbridge.Client
 	Commands       []*discordgo.ApplicationCommand
+	log            *slog.Logger
 }
 
 // TODO: Fuck den här, vi måste lösa det på nått bättre sätt sen
@@ -37,38 +39,45 @@ var (
 )
 
 func main() {
-	app := &App{}
+	log := logging.New(logging.Config{
+		Env: "prod", Level: slog.LevelInfo, AddSource: true,
+	})
+	slog.SetDefault(log)
+
+	app := &App{
+		log: log,
+	}
 
 	if err := app.loadConfig(); err != nil {
-		log.Fatalf("Failed to load config: %v", err)
+		log.Error("Failed to load config: %v", err)
 	}
 
 	if err := app.connectToServices(); err != nil {
-		log.Fatalf("Failed to connect services: %v", err)
+		log.Error("Failed to connect services: %v", err)
 	}
 
 	defer app.shutdown()
 	app.setupDiscordHandlers()
-	commandsTest, err := app.DiscordSession.ApplicationCommands(app.DiscordSession.State.Application.ID, "")
+	_, err := app.DiscordSession.ApplicationCommands(app.DiscordSession.State.Application.ID, "")
 	if err == nil {
-		for _, v := range commandsTest {
-			log.Printf("Commands: %v Type: %v", v.Name, v.Type)
-		}
-
+		// for _, v := range commandsTest {
+		// 	log.Printf("Commands: %v Type: %v", v.Name, v.Type)
+		// }
 	}
-	log.Println("Have setup Discord handlers")
+	log.Info("Have setup Discord handlers")
 	go app.readMinecraftMessages()
 
 	// Wait for interrupt signal
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt)
 	<-stop
-	log.Println("Gracefully shutting down.")
+	log.Info("Gracefully shutting down.")
 }
 
 func (a *App) loadConfig() error {
 	if err := godotenv.Load(); err != nil {
-		log.Fatal("Error loading .env file")
+		a.log.Error("Error loading .env file")
+		return err
 	}
 
 	a.Config = Config{
@@ -115,7 +124,7 @@ func (a *App) connectToServices() error {
 	if !st.Connected && st.BreakerState != tcpbridge.BreakerClosed {
 		return fmt.Errorf("failed to connect to Minecraft mod socket: %w", tcpbridge.ErrUnavailable)
 	}
-	log.Printf("Connected to Minecraft mod socket on %s", a.Config.MinecraftAddress)
+	a.log.Info("Connected to Minecraft mod socket on %s", a.Config.MinecraftAddress)
 	// _, events, _ := a.MinecraftConn.Subscribe(256)
 	// // TODO: handle events before merge
 	// go func() {
@@ -136,13 +145,13 @@ func (a *App) connectToServices() error {
 func (a *App) setupDiscordHandlers() {
 	cmds := initCommands(a)
 	a.DiscordSession.AddHandler(func(s *discordgo.Session, r *discordgo.Ready) {
-		log.Printf("Logged in as: %v#%v", s.State.User.Username, s.State.User.Discriminator)
-		log.Println("Bot is now running. Press CTRL+C to exit.")
+		a.log.Info("Logged in as: %v#%v", s.State.User.Username, s.State.User.Discriminator)
+		a.log.Info("Bot is now running. Press CTRL+C to exit.")
 	})
 	var err error
 	a.Commands, err = createCommands(a.DiscordSession, cmds)
 	if err != nil {
-		fmt.Println("Could not create commands")
+		a.log.Error("Could not create commands: %w", err)
 	}
 	//TODO gör funktion som hanterar varje commands handler funktion. Ta in s och i och kalla på handler()
 	a.DiscordSession.AddHandler(a.onDiscordMessage)
@@ -150,7 +159,7 @@ func (a *App) setupDiscordHandlers() {
 	a.DiscordSession.AddHandler(a.onWhitelistModalResponse)
 	a.DiscordSession.AddHandler(a.onUserLeft)
 	a.DiscordSession.AddHandler(onWhitelistModalRequested)
-	a.DiscordSession.AddHandler(onApplicationCommand)
+	a.DiscordSession.AddHandler(a.onApplicationCommand)
 }
 
 func (a *App) shutdown() {
@@ -164,13 +173,13 @@ func (a *App) shutdown() {
 	db.Close()
 }
 
-func onApplicationCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
+func (a *App) onApplicationCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	if i.Type != discordgo.InteractionApplicationCommand {
 		return
 	}
 	cmd, ok := commandHandlers[i.ApplicationCommandData().Name]
 	if !ok {
-		log.Printf("Unknown command: %s", i.ApplicationCommandData().Name)
+		a.log.Warn("Unknown command: %s", i.ApplicationCommandData().Name)
 		return
 	}
 	cmd(s, i)
@@ -178,7 +187,7 @@ func onApplicationCommand(s *discordgo.Session, i *discordgo.InteractionCreate) 
 
 func (a *App) onUserLeft(s *discordgo.Session, m *discordgo.GuildMemberRemove) {
 	user := m.User.ID
-	log.Println("user left" + user)
+	a.log.Info("user left" + user)
 	a.removeWhitelist(user)
 }
 
@@ -193,7 +202,7 @@ func (a *App) onDiscordMessage(s *discordgo.Session, m *discordgo.MessageCreate)
 
 	if m.ChannelID == a.Config.MinecraftDiscordMessengerChannelID {
 		if a.MinecraftConn == nil {
-			log.Printf("Minecraft connection not established cannot forward message to Minecraft mod")
+			a.log.Warn("Minecraft connection not established cannot forward message to Minecraft mod")
 			return
 		}
 
@@ -202,9 +211,9 @@ func (a *App) onDiscordMessage(s *discordgo.Session, m *discordgo.MessageCreate)
 		ctx := context.Background()
 		_, err := a.MinecraftConn.Send(ctx, []byte(msg))
 		if err != nil {
-			log.Printf("Error sending to Minecraft mod: %v", err)
+			a.log.Error("Error sending to Minecraft mod: %v", err)
 		} else {
-			log.Printf("Sent to Minecraft: %s", msg)
+			a.log.Info("Sent to Minecraft: %s", msg)
 		}
 	}
 }
