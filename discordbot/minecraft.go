@@ -23,7 +23,7 @@ func (a *App) readMinecraftMessages() {
 	defer cancel()
 
 	// Chat sender (unchanged, still ~1 msg/sec)
-	out := make(chan string, 2048)
+	out := make(chan string, 4096)
 	go func() {
 		tokens := make(chan struct{}, 5)
 		for i := 0; i < cap(tokens); i++ {
