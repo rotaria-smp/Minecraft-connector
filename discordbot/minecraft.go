@@ -27,7 +27,7 @@ func (a *App) readMinecraftMessages() {
 		}
 	}()
 
-	_, events, cancel := a.MinecraftConn.Subscribe(128)
+	_, events, cancel := a.MinecraftConn.Subscribe(8192)
 	defer cancel()
 
 	for evt := range events {

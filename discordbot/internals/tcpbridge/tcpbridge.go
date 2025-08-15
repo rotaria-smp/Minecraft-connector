@@ -320,6 +320,9 @@ func (c *Client) writeFrame(conn net.Conn, buf []byte) (int, error) {
 }
 
 func (c *Client) enqueue(buf []byte) {
+	if c.closed.Load() {
+		return
+	}
 	select {
 	case c.wq <- buf:
 	default:
@@ -328,6 +331,9 @@ func (c *Client) enqueue(buf []byte) {
 }
 
 func (c *Client) enqueueJSON(m message) {
+	if c.closed.Load() {
+		return
+	}
 	b, _ := json.Marshal(m)
 	b = append(b, '\n')
 	c.enqueue(b)
@@ -411,7 +417,7 @@ func (c *Client) failAllPending(err error) {
 
 func (c *Client) Subscribe(buffer int) (id int64, ch <-chan Event, cancel func()) {
 	if buffer <= 0 {
-		buffer = 64
+		buffer = 2048 // larger default to tolerate bursts
 	}
 	cid := c.subSeq.Add(1)
 	eventCh := make(chan Event, buffer)
@@ -439,7 +445,22 @@ func (c *Client) broadcast(evt Event) {
 	for _, ch := range c.subs {
 		select {
 		case ch <- evt:
+			// delivered
 		default:
+			// give the consumer a brief chance to catch up
+			select {
+			case ch <- evt:
+			case <-time.After(250 * time.Millisecond):
+				// still full: evict one oldest, then try once more
+				select {
+				case <-ch:
+				default:
+				}
+				select {
+				case ch <- evt:
+				default:
+				}
+			}
 		}
 	}
 	c.subsMu.RUnlock()
