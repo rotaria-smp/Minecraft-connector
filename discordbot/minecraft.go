@@ -17,7 +17,7 @@ func (a *App) readMinecraftMessages() {
 	}
 
 	// Subscribe to Minecraft events
-	_, events, cancel := a.MinecraftConn.Subscribe(4096)
+	_, events, cancel := a.MinecraftConn.Subscribe(8192)
 	defer cancel()
 
 	out := make(chan string, 2048)
