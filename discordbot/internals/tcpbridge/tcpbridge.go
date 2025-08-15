@@ -157,17 +157,23 @@ func (c *Client) Start(ctx context.Context) {
 		defer c.wg.Done()
 		backoff := time.Second
 		for ctx.Err() == nil && !c.closed.Load() {
-			conn, err := net.DialTimeout("tcp", c.addr, c.opt.DialTimeout)
+			d := &net.Dialer{
+				Timeout:   c.opt.DialTimeout,
+				KeepAlive: 30 * time.Second, // important: shorter than common NAT idle timeouts
+			}
+			conn, err := d.DialContext(ctx, "tcp", c.addr)
 			if err != nil {
 				// dial failed: standard backoff with jitter
 				sleepWithJitter(&backoff, c.opt.ReconnectMaxBackoff, ctx)
 				continue
 			}
-
-			// connection succeeded
 			c.setConn(conn)
 			uptimeStart := time.Now()
 			err = c.run(ctx, conn)
+
+			if err != nil {
+				log.Println("tcpbridge: connection error, ", err)
+			}
 
 			// If it flapped quickly (dropped connection immediately), back off before the next dial to avoid thrash
 			if time.Since(uptimeStart) < time.Second*2 {
@@ -238,9 +244,16 @@ func (c *Client) run(ctx context.Context, conn net.Conn) error {
 		defer c.wg.Done()
 		br := bufio.NewReader(conn)
 		for {
-			_ = conn.SetReadDeadline(time.Now().Add(c.opt.ReadTimeout))
+			if c.opt.ReadTimeout > 0 {
+				_ = conn.SetReadDeadline(time.Now().Add(c.opt.ReadTimeout))
+			}
 			line, err := br.ReadBytes('\n')
 			if err != nil {
+				// If it's just a timeout, continue waiting for data
+				if ne, ok := err.(net.Error); ok && ne.Timeout() {
+					log.Printf("tcpbridge: read timeout — continuing")
+					continue
+				}
 				errs <- err
 				return
 			}
@@ -250,8 +263,8 @@ func (c *Client) run(ctx context.Context, conn net.Conn) error {
 			}
 			var m message
 			if err := json.Unmarshal([]byte(str), &m); err != nil {
-				errs <- ErrBadFrame
-				return
+				log.Printf("tcpbridge: bad frame (ignored): %q err=%v", str, err)
+				continue
 			}
 			switch m.Type {
 			case "PONG":
@@ -337,7 +350,14 @@ func (c *Client) enqueueJSON(m message) {
 	}
 	b, _ := json.Marshal(m)
 	b = append(b, '\n')
-	c.enqueue(b)
+	select {
+	case c.wq <- b:
+	default:
+		// queue full — drop PINGs; for CMD/critical you might still block
+		if m.Type != "PING" {
+			c.wq <- b // allow blocking for non-heartbeat frames
+		}
+	}
 }
 
 func (c *Client) Send(ctx context.Context, payload []byte) ([]byte, error) {
