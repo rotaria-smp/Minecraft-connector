@@ -20,7 +20,7 @@ public class StatusReporter {
         if (event.phase != TickEvent.Phase.END) return;
 
         tickCounter++;
-        if (tickCounter >= 200) { // ~10s
+        if (tickCounter >= 400) { // ~20s
             tickCounter = 0;
             reportStatus();
         }
@@ -34,8 +34,6 @@ public class StatusReporter {
         double tps = Math.min(1000.0 / meanTickTime, 20.0);
 
         int playerCount = server.getPlayerList().getPlayerCount();
-        List<ServerPlayer> players = server.getPlayerList().getPlayers();
-
         String statusMessage = String.format("[UPDATE] TPS: %.2f %s",
                 tps, playerCount > 0 ? (" | Online: " + playerCount) : "");
 
