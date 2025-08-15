@@ -15,13 +15,24 @@ func (a *App) readMinecraftMessages() {
 		return
 	}
 
+	msgChan := make(chan string, 200)
+
+	go func() {
+		for msg := range msgChan {
+			go func(m string) {
+				if _, err := a.DiscordSession.ChannelMessageSend(a.Config.MinecraftDiscordMessengerChannelID, m); err != nil {
+					log.Printf("Error sending message to Discord: %v", err)
+				}
+			}(msg)
+		}
+	}()
+
 	_, events, cancel := a.MinecraftConn.Subscribe(128)
 	defer cancel()
 
 	for evt := range events {
 		topic := evt.Topic
 		body := string(evt.Body)
-		log.Printf("Received from Minecraft topic %s: %s", topic, body)
 		if body == "" {
 			continue
 		}
@@ -34,24 +45,16 @@ func (a *App) readMinecraftMessages() {
 		case entities.TopicLeave:
 			fallthrough
 		case entities.TopicChat:
-			log.Println("Status update received:", body)
-
 			username := ""
 			content := body
 			if strings.HasPrefix(body, "<") {
-				endIdx := strings.Index(body, ">")
-				if endIdx != -1 {
+				if endIdx := strings.Index(body, ">"); endIdx != -1 {
 					username = body[:endIdx+1]
 					content = strings.TrimSpace(body[endIdx+1:])
 				}
 			}
-
 			fullMessage := fmt.Sprintf("%s %s", username, content)
-
-			log.Printf("Received from Minecraft: %s", fullMessage)
-			if _, err := a.DiscordSession.ChannelMessageSend(a.Config.MinecraftDiscordMessengerChannelID, fullMessage); err != nil {
-				log.Printf("Error sending message to Discord: %v", err)
-			}
+			msgChan <- fullMessage 
 
 		case entities.TopicStatus:
 			log.Println("Chat message received:", body)
@@ -67,8 +70,6 @@ func (a *App) readMinecraftMessages() {
 		}
 	}
 }
-
-
 
 func (a *App) updateBotPresence(status string) {
 	err := a.DiscordSession.UpdateGameStatus(0, status)
