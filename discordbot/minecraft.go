@@ -211,24 +211,3 @@ func (a *App) startStatusWorkers() {
 		}
 	}()
 }
-
-func (a *App) updateBotPresence(status string) {
-	err := a.DiscordSession.UpdateGameStatus(0, status)
-	if err != nil {
-		log.Printf("Failed to update bot status: %v", err)
-	}
-}
-
-func (a *App) setVoiceChannelStatus(channelID, status string) {
-	newName := "🟢 " + status
-	if len(newName) > 100 {
-		newName = newName[:100]
-	}
-
-	_, err := a.DiscordSession.ChannelEdit(channelID, &discordgo.ChannelEdit{
-		Name: newName,
-	})
-	if err != nil {
-		log.Printf("Failed to update voice channel name: %v", err)
-	}
-}
