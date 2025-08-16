@@ -205,6 +205,12 @@ func (a *App) onDiscordMessage(s *discordgo.Session, m *discordgo.MessageCreate)
 			return
 		}
 
+		// Filter Discord → Minecraft with blacklist
+		if a.isBlacklisted(m.Content) {
+			log.Printf("Blocked blacklisted Discord message: %s", m.Content)
+			return
+		}
+
 		msg := fmt.Sprintf("[Discord] %s: %s", m.Author.Username, m.Content)
 
 		ctx := context.Background()
@@ -216,3 +222,4 @@ func (a *App) onDiscordMessage(s *discordgo.Session, m *discordgo.MessageCreate)
 		}
 	}
 }
+
