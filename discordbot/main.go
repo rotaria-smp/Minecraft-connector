@@ -208,6 +208,10 @@ func (a *App) onDiscordMessage(s *discordgo.Session, m *discordgo.MessageCreate)
 		// Filter Discord → Minecraft with blacklist
 		if a.isBlacklisted(m.Content) {
 			log.Printf("Blocked blacklisted Discord message: %s", m.Content)
+			err := a.DiscordSession.ChannelMessageDelete(m.ChannelID, m.ID)
+			if err != nil {
+				log.Printf("Failed to delete message: %v", err)
+			}
 			return
 		}
 
