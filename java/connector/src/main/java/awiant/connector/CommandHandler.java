@@ -1,7 +1,9 @@
 package awiant.connector;
 
 import com.mojang.authlib.GameProfile;
+import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.players.PlayerList;
 import net.minecraft.server.players.UserWhiteList;
 import net.minecraft.server.players.UserWhiteListEntry;
@@ -9,7 +11,7 @@ import net.minecraft.server.players.UserWhiteListEntry;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 
-public class WhitelistHandler {
+public class CommandHandler {
 
     public static void addToWhitelist(MinecraftServer server, String playerName) {
         PlayerList playerList = server.getPlayerList();
@@ -80,6 +82,20 @@ public class WhitelistHandler {
                     Connector.LOGGER.warn("Could not find a valid profile for " + playerName + " to remove from whitelist");
                 }
             });
+        }
+    }
+    public static void kickPlayer(MinecraftServer server, String playerName) {
+        PlayerList playerList = server.getPlayerList();
+        ServerPlayer player = playerList.getPlayerByName(playerName);
+
+        if (player != null) {
+            try {
+                player.connection.disconnect(Component.literal("You have been kicked from the server. Reason: Word in blacklist, please do not use it"));
+            } catch (Exception e) {
+                Connector.LOGGER.error("Could not kick " + playerName + ": " + e.getMessage(), e);
+            }
+        } else {
+            Connector.LOGGER.warn("Player " + playerName + " not found or not online.");
         }
     }
 }

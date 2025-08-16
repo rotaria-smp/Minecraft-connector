@@ -40,6 +40,9 @@ type App struct {
 	lastChannelEdit atomic.Value // time.Time
 	lastPresence    atomic.Value // string
 	lastPresenceAt  atomic.Value // time.Time
+
+	// blacklist words
+	blacklist []string
 }
 
 // TODO: Fuck den här, vi måste lösa det på nått bättre sätt sen
@@ -52,6 +55,14 @@ func main() {
 
 	if err := app.loadConfig(); err != nil {
 		log.Fatalf("Failed to load config: %v", err)
+	}
+
+	bl, err := loadBlacklist("blacklist.txt")
+	if err != nil {
+		log.Printf("Warning: could not load blacklist.txt: %v", err)
+	} else {
+		app.blacklist = bl
+		log.Printf("Loaded %d blacklisted words", len(bl))
 	}
 
 	if err := app.connectToServices(); err != nil {
@@ -194,6 +205,16 @@ func (a *App) onDiscordMessage(s *discordgo.Session, m *discordgo.MessageCreate)
 			return
 		}
 
+		// Filter Discord → Minecraft with blacklist
+		if a.isBlacklisted(m.Content) {
+			log.Printf("Blocked blacklisted Discord message: %s", m.Content)
+			err := a.DiscordSession.ChannelMessageDelete(m.ChannelID, m.ID)
+			if err != nil {
+				log.Printf("Failed to delete message: %v", err)
+			}
+			return
+		}
+
 		msg := fmt.Sprintf("[Discord] %s: %s", m.Author.Username, m.Content)
 
 		ctx := context.Background()
@@ -205,3 +226,4 @@ func (a *App) onDiscordMessage(s *discordgo.Session, m *discordgo.MessageCreate)
 		}
 	}
 }
+

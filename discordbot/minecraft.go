@@ -4,11 +4,38 @@ import (
 	"fmt"
 	"limpan/rotaria-bot/entities"
 	"log"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/bwmarrin/discordgo"
 )
+
+func loadBlacklist(path string) ([]string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	lines := strings.Split(string(data), "\n")
+	var blacklist []string
+	for _, l := range lines {
+		word := strings.TrimSpace(l)
+		if word != "" {
+			blacklist = append(blacklist, word)
+		}
+	}
+	return blacklist, nil
+}
+
+func (a *App) isBlacklisted(msg string) bool {
+	lower := strings.ToLower(msg)
+	for _, w := range a.blacklist {
+		if strings.Contains(lower, strings.ToLower(w)) {
+			return true
+		}
+	}
+	return false
+}
 
 func (a *App) readMinecraftMessages() {
 	if a.MinecraftConn == nil {
@@ -82,28 +109,34 @@ func (a *App) readMinecraftMessages() {
 
 		// Everything else goes to chat
 		var msg string
-		if evt.Topic == entities.TopicChat {
-			username := ""
-			content := body
-			if strings.HasPrefix(body, "<") {
-				if endIdx := strings.Index(body, ">"); endIdx != -1 {
-					username = body[:endIdx+1]
-					content = strings.TrimSpace(body[endIdx+1:])
-				}
+		username := ""
+		content := body
+
+		if evt.Topic == entities.TopicChat && strings.HasPrefix(body, "<") {
+			if endIdx := strings.Index(body, ">"); endIdx != -1 {
+				username = body[1:endIdx]          // cleaned Minecraft username
+				content = strings.TrimSpace(body[endIdx+1:])
 			}
-			msg = strings.TrimSpace(fmt.Sprintf("%s %s", username, content))
-		} else {
-			msg = body
 		}
 
-		if msg != "" {
-			// don’t block the loop if out is momentarily full
-			select {
-			case out <- msg:
-			default:
-				// if you prefer dropping to avoid head-of-line blocking:
-				log.Printf("chat queue full; dropping message")
-			}
+		msg = content // only the message content for blacklist checking
+
+		if msg != "" && a.isBlacklisted(msg) {
+			log.Printf("Blocked blacklisted message from %s: %q", username, msg)
+			a.kickPlayer(username) 
+			continue
+		}
+
+		// Reconstruct message for Discord
+		fullMsg := msg
+		if username != "" {
+			fullMsg = fmt.Sprintf("<%s> %s", username, msg)
+		}
+
+		select {
+		case out <- fullMsg:
+		default:
+			log.Printf("chat queue full; dropping message")
 		}
 	}
 }
@@ -177,25 +210,4 @@ func (a *App) startStatusWorkers() {
 			a.lastPresenceAt.Store(time.Now())
 		}
 	}()
-}
-
-func (a *App) updateBotPresence(status string) {
-	err := a.DiscordSession.UpdateGameStatus(0, status)
-	if err != nil {
-		log.Printf("Failed to update bot status: %v", err)
-	}
-}
-
-func (a *App) setVoiceChannelStatus(channelID, status string) {
-	newName := "🟢 " + status
-	if len(newName) > 100 {
-		newName = newName[:100]
-	}
-
-	_, err := a.DiscordSession.ChannelEdit(channelID, &discordgo.ChannelEdit{
-		Name: newName,
-	})
-	if err != nil {
-		log.Printf("Failed to update voice channel name: %v", err)
-	}
 }
