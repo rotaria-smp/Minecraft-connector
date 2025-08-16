@@ -135,15 +135,19 @@ public class DiscordBridge {
                 String lower = cmd.toLowerCase();
                 if (lower.startsWith("whitelist add ")) {
                     String playerName = cmd.substring("whitelist add ".length()).trim();
-                    WhitelistHandler.addToWhitelist(server, playerName);
+                    CommandHandler.addToWhitelist(server, playerName);
                     fut.complete("ok");
                 } else if (lower.startsWith("unwhitelist ")) {
                     String playerName = cmd.substring("unwhitelist ".length()).trim();
-                    WhitelistHandler.removeFromWhitelist(server, playerName);
+                    CommandHandler.removeFromWhitelist(server, playerName);
                     fut.complete("ok");
                 } else if (lower.startsWith("say ")) {
                     String msg = cmd.substring("say ".length());
                     server.getPlayerList().broadcastSystemMessage(Component.literal(msg), false);
+                    fut.complete("ok");
+                } else if (lower.startsWith("kick ")) {
+                    String playerName = cmd.substring("kick ".length()).trim();
+                    CommandHandler.kickPlayer(server, playerName);
                     fut.complete("ok");
                 } else {
                     server.getPlayerList().broadcastSystemMessage(Component.literal(cmd), false);

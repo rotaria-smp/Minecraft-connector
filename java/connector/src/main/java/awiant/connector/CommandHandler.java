@@ -90,7 +90,7 @@ public class CommandHandler {
 
         if (player != null) {
             try {
-                player.connection.disconnect(Component.literal("You have been kicked from the server."));
+                player.connection.disconnect(Component.literal("You have been kicked from the server. Reason: Word in blacklist, please do not use it"));
             } catch (Exception e) {
                 Connector.LOGGER.error("Could not kick " + playerName + ": " + e.getMessage(), e);
             }

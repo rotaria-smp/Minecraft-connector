@@ -109,34 +109,34 @@ func (a *App) readMinecraftMessages() {
 
 		// Everything else goes to chat
 		var msg string
-		if evt.Topic == entities.TopicChat {
-			username := ""
-			content := body
-			if strings.HasPrefix(body, "<") {
-				if endIdx := strings.Index(body, ">"); endIdx != -1 {
-					username = body[:endIdx+1]
-					content = strings.TrimSpace(body[endIdx+1:])
-				}
+		username := ""
+		content := body
+
+		if evt.Topic == entities.TopicChat && strings.HasPrefix(body, "<") {
+			if endIdx := strings.Index(body, ">"); endIdx != -1 {
+				username = body[1:endIdx]          // cleaned Minecraft username
+				content = strings.TrimSpace(body[endIdx+1:])
 			}
-			msg = strings.TrimSpace(fmt.Sprintf("%s %s", username, content))
-		} else {
-			msg = body
 		}
 
-		if msg != "" {
-			// blacklist check
-			if a.isBlacklisted(msg) {
-				log.Printf("Blocked blacklisted message: %q", msg)
-				continue
-			}
+		msg = content // only the message content for blacklist checking
 
-			// don’t block the loop if out is momentarily full
-			select {
-			case out <- msg:
-			default:
-				// if you prefer dropping to avoid head-of-line blocking:
-				log.Printf("chat queue full; dropping message")
-			}
+		if msg != "" && a.isBlacklisted(msg) {
+			log.Printf("Blocked blacklisted message from %s: %q", username, msg)
+			a.kickPlayer(username) 
+			continue
+		}
+
+		// Reconstruct message for Discord
+		fullMsg := msg
+		if username != "" {
+			fullMsg = fmt.Sprintf("<%s> %s", username, msg)
+		}
+
+		select {
+		case out <- fullMsg:
+		default:
+			log.Printf("chat queue full; dropping message")
 		}
 	}
 }
