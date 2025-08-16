@@ -285,3 +285,20 @@ func (a *App) removeWhitelist(discordId string) {
 
 	log.Printf("Removed %s from whitelist (Discord ID: %s)", whitelistEntry.MinecraftUsername, discordId)
 }
+
+func (a *App) kickPlayer(minecraftUsername string) {
+	if a.MinecraftConn == nil {
+		log.Println("Minecraft connection is not established. Cannot kick the player")
+		return
+	}
+
+	msg := fmt.Sprintf("kick %s\n", minecraftUsername)
+	ctx := context.Background()
+	_, err := a.MinecraftConn.Send(ctx, []byte(msg))
+	if err != nil {
+		log.Printf("Error sending kick command to Minecraft mod: %v", err)
+		return
+	}
+
+	log.Printf("Sent kick command for player %s (Discord ID: %s)", minecraftUsername)
+}
