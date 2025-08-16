@@ -40,6 +40,9 @@ type App struct {
 	lastChannelEdit atomic.Value // time.Time
 	lastPresence    atomic.Value // string
 	lastPresenceAt  atomic.Value // time.Time
+
+	// blacklist words
+	blacklist []string
 }
 
 // TODO: Fuck den här, vi måste lösa det på nått bättre sätt sen
@@ -52,6 +55,14 @@ func main() {
 
 	if err := app.loadConfig(); err != nil {
 		log.Fatalf("Failed to load config: %v", err)
+	}
+
+	bl, err := loadBlacklist("blacklist.txt")
+	if err != nil {
+		log.Printf("Warning: could not load blacklist.txt: %v", err)
+	} else {
+		app.blacklist = bl
+		log.Printf("Loaded %d blacklisted words", len(bl))
 	}
 
 	if err := app.connectToServices(); err != nil {

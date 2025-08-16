@@ -4,11 +4,38 @@ import (
 	"fmt"
 	"limpan/rotaria-bot/entities"
 	"log"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/bwmarrin/discordgo"
 )
+
+func loadBlacklist(path string) ([]string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	lines := strings.Split(string(data), "\n")
+	var blacklist []string
+	for _, l := range lines {
+		word := strings.TrimSpace(l)
+		if word != "" {
+			blacklist = append(blacklist, word)
+		}
+	}
+	return blacklist, nil
+}
+
+func (a *App) isBlacklisted(msg string) bool {
+	lower := strings.ToLower(msg)
+	for _, w := range a.blacklist {
+		if strings.Contains(lower, strings.ToLower(w)) {
+			return true
+		}
+	}
+	return false
+}
 
 func (a *App) readMinecraftMessages() {
 	if a.MinecraftConn == nil {
@@ -97,6 +124,12 @@ func (a *App) readMinecraftMessages() {
 		}
 
 		if msg != "" {
+			// blacklist check
+			if a.isBlacklisted(msg) {
+				log.Printf("Blocked blacklisted message: %q", msg)
+				continue
+			}
+
 			// don’t block the loop if out is momentarily full
 			select {
 			case out <- msg:
