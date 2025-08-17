@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"limpan/rotaria-bot/internals/db"
+	"limpan/rotaria-bot/internals/rotarialog"
 	"limpan/rotaria-bot/internals/tcpbridge"
+
 	"log"
 	"os"
 	"os/signal"
@@ -52,7 +54,9 @@ var (
 
 func main() {
 	app := &App{}
-
+	var rotariaLogger rotarialog.RotariaLog
+	rotariaLogger.InitLogDir()
+	defer rotariaLogger.CleanLogs()
 	if err := app.loadConfig(); err != nil {
 		log.Fatalf("Failed to load config: %v", err)
 	}
