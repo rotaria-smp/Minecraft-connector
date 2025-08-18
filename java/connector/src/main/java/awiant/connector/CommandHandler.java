@@ -1,13 +1,19 @@
 package awiant.connector;
 
 import com.mojang.authlib.GameProfile;
+import net.minecraft.commands.CommandSource;
+import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.players.PlayerList;
 import net.minecraft.server.players.UserWhiteList;
 import net.minecraft.server.players.UserWhiteListEntry;
+import net.minecraft.world.phys.Vec2;
+import net.minecraft.world.phys.Vec3;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 
@@ -96,6 +102,64 @@ public class CommandHandler {
             }
         } else {
             Connector.LOGGER.warn("Player " + playerName + " not found or not online.");
+        }
+    }
+
+    public static List<String> ExecuteCommand(MinecraftServer server, String command) {
+        CapturingCommandSource cap = new CapturingCommandSource();
+        CommandSourceStack source = new CommandSourceStack(
+                cap,                        // no entity, NULL works
+                new Vec3(0, 64, 0),                        // position in the world
+                Vec2.ZERO,                                 // rotation
+                server.overworld(),                        // dimension / level
+                0,                                         // permission level (0 = non-op)
+                "System",                                  // name
+                Component.literal("System"),               // display name
+                server,                                    // server instance
+                null                                       // no entity context
+        );
+        Connector.LOGGER.debug("Executing command {}", command);
+        int result = server.getCommands().performPrefixedCommand(source, command);
+
+        Connector.LOGGER.debug("Result code: {}", result);
+        cap.getMessages().forEach(msg ->
+                Connector.LOGGER.debug("Captured: {}", msg.getString())
+        );
+
+        // Convert captured messages to plain strings
+        List<String> out = new ArrayList<>();
+        for (Component c : cap.getMessages()) {
+            out.add(c.getString()); // or use Component.Serializer.toJson(c) if you want formatting
+        }
+
+        return out;
+    }
+
+    private static  class  CapturingCommandSource implements CommandSource {
+        private final List<Component> messages = new ArrayList<>();
+
+        @Override
+        public void sendSystemMessage(Component component) {
+            messages.add(component);
+        }
+
+        @Override
+        public boolean acceptsSuccess() {
+            return true; // capture success messages
+        }
+
+        @Override
+        public boolean acceptsFailure() {
+            return true; // capture failure messages
+        }
+
+        @Override
+        public boolean shouldInformAdmins() {
+            return false; // don’t spam console/log
+        }
+
+        public List<Component> getMessages() {
+            return messages;
         }
     }
 }
