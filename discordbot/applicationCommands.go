@@ -16,6 +16,10 @@ func initCommands(a *App) []*discordgo.ApplicationCommand {
 			Name:        "whitelist",
 			Description: "Begin whitelist application",
 		},
+		{
+			Name:        "list",
+			Description: "List all current online players",
+		},
 	}
 
 	commandHandlers = map[string]func(s *discordgo.Session, i *discordgo.InteractionCreate){
@@ -36,33 +40,30 @@ func initCommands(a *App) []*discordgo.ApplicationCommand {
 				Type: discordgo.InteractionResponseChannelMessageWithSource,
 				Data: &discordgo.InteractionResponseData{
 					Embeds: []*discordgo.MessageEmbed{&embed},
+					Flags:  discordgo.MessageFlagsEphemeral,
 				},
 			})
 		},
 		"whitelist": func(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			showWhitelistModal(s, i)
 		},
+		"list": func(s *discordgo.Session, i *discordgo.InteractionCreate) {
+			serverResponse := a.executeNonPrivilagedCommand(s, i, "list")
+
+			embed := discordgo.MessageEmbed{
+				Title:       "Commands",
+				Description: serverResponse,
+			}
+			s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+				Type: discordgo.InteractionResponseChannelMessageWithSource,
+				Data: &discordgo.InteractionResponseData{
+					Embeds: []*discordgo.MessageEmbed{&embed},
+					Flags:  discordgo.MessageFlagsEphemeral,
+				},
+			})
+		},
 	}
 	return commands
-}
-
-func (a *App) handleCommandsCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	fmt.Println("hejhej")
-	cmd := a.Commands
-	fmt.Printf("commands: %v", cmd)
-	var comps []discordgo.MessageComponent
-	for _, v := range cmd {
-		comps = append(comps, discordgo.TextDisplay{
-			Content: v.Name,
-		})
-	}
-
-	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-		Type: discordgo.InteractionResponseChannelMessageWithSource,
-		Data: &discordgo.InteractionResponseData{
-			Components: comps,
-		},
-	})
 }
 
 func createCommands(s *discordgo.Session, unregisteredCommands []*discordgo.ApplicationCommand) ([]*discordgo.ApplicationCommand, error) {

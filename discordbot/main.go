@@ -215,7 +215,7 @@ func (a *App) onDiscordMessage(s *discordgo.Session, m *discordgo.MessageCreate)
 			return
 		}
 
-		msg := fmt.Sprintf("[Discord] %s: %s", m.Author.Username, m.Content)
+		msg := fmt.Sprintf("[Discord] %s: %s", m.Author.DisplayName(), m.Content)
 
 		ctx := context.Background()
 		_, err := a.MinecraftConn.Send(ctx, []byte(msg))
@@ -226,4 +226,3 @@ func (a *App) onDiscordMessage(s *discordgo.Session, m *discordgo.MessageCreate)
 		}
 	}
 }
-
