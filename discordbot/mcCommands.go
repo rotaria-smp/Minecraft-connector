@@ -286,6 +286,23 @@ func (a *App) removeWhitelist(discordId string) {
 	log.Printf("Removed %s from whitelist (Discord ID: %s)", whitelistEntry.MinecraftUsername, discordId)
 }
 
+func (a *App) executeNonPrivilagedCommand(s *discordgo.Session, i *discordgo.InteractionCreate, command string) string {
+	if a.MinecraftConn == nil {
+		log.Println("Minecraft connection is not established. Cannot execute command")
+		return ""
+	}
+	msg := fmt.Sprintf("commandexec %s\n", command)
+	ctx := context.Background()
+	response, err := a.MinecraftConn.Send(ctx, []byte(msg))
+	if err != nil {
+		log.Printf("Error sending command to Minecraft mod: %v", err)
+		return ""
+	}
+
+	log.Printf("Sent command to Minecraft: %s", command)
+	return string(response)
+}
+
 func (a *App) kickPlayer(minecraftUsername string) {
 	if a.MinecraftConn == nil {
 		log.Println("Minecraft connection is not established. Cannot kick the player")

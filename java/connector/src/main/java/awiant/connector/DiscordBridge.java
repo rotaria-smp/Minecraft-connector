@@ -10,6 +10,8 @@ import java.io.*;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.*;
 
 public class DiscordBridge {
@@ -61,7 +63,7 @@ public class DiscordBridge {
 
     private void handleClient(ClientSession sess) {
         try (InputStream rin = sess.socket.getInputStream();
-             BufferedReader hin = new BufferedReader(new InputStreamReader(rin, StandardCharsets.UTF_8))) {
+            BufferedReader hin = new BufferedReader(new InputStreamReader(rin, StandardCharsets.UTF_8))) {
 
             for (;;) {
                 String line = hin.readLine();
@@ -149,7 +151,12 @@ public class DiscordBridge {
                     String playerName = cmd.substring("kick ".length()).trim();
                     CommandHandler.kickPlayer(server, playerName);
                     fut.complete("ok");
-                } else {
+                } else if (lower.startsWith("commandexec ")) {
+                    String actualCommand = cmd.substring("commandexec ".length());
+                    List<String> response = CommandHandler.ExecuteCommand(server, actualCommand);
+                    fut.complete(response.get(0));
+                }
+                else {
                     server.getPlayerList().broadcastSystemMessage(Component.literal(cmd), false);
                     fut.complete("ok");
                 }
