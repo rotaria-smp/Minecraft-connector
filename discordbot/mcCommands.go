@@ -208,7 +208,7 @@ func (a *App) onWhitelistModalResponse(s *discordgo.Session, i *discordgo.Intera
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseUpdateMessage,
 			Data: &discordgo.InteractionResponseData{
-				Content:    fmt.Sprintf("✅ Approved `%s` for whitelisting!", username),
+				Content:    fmt.Sprintf("✅ Approved `%s` for whitelisting! (Requested by: <@%s>)", username, requester),
 				Components: []discordgo.MessageComponent{},
 			},
 		})
