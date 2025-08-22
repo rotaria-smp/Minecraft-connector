@@ -135,6 +135,9 @@ func (a *App) readMinecraftMessages() {
 		if strings.Contains(fullMsg, "@everyone") {
 			fullMsg = ""
 		}
+		if strings.Contains(fullMsg, "@here") {
+			fullMsg = ""
+		}
 
 		if fullMsg != "" {
 			select {
