@@ -132,11 +132,16 @@ func (a *App) readMinecraftMessages() {
 		if username != "" {
 			fullMsg = fmt.Sprintf("<%s> %s", username, msg)
 		}
+		if strings.Contains(fullMsg, "@everyone") {
+			fullMsg = ""
+		}
 
-		select {
-		case out <- fullMsg:
-		default:
-			log.Printf("chat queue full; dropping message")
+		if fullMsg != "" {
+			select {
+			case out <- fullMsg:
+			default:
+				log.Printf("chat queue full; dropping message")
+			}
 		}
 	}
 }
