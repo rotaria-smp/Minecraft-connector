@@ -132,8 +132,10 @@ func (a *App) readMinecraftMessages() {
 		if username != "" {
 			fullMsg = fmt.Sprintf("<%s> %s", username, msg)
 		}
+
 		if strings.Contains(fullMsg, "@") {
 			log.Printf("Blocked blacklisted message from %s: %q", username, fullMsg)
+
 			fullMsg = ""
 		}
 
