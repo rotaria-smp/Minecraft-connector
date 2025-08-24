@@ -160,6 +160,7 @@ func (a *App) setupDiscordHandlers() {
 	a.DiscordSession.AddHandler(a.onWhitelistModalResponse)
 	a.DiscordSession.AddHandler(a.onReportModalSubmitted)
 	a.DiscordSession.AddHandler(a.onReportAction)
+	a.DiscordSession.AddHandler(a.onReportActionModalSubmitted)
 	a.DiscordSession.AddHandler(a.onUserLeft)
 	a.DiscordSession.AddHandler(onWhitelistModalRequested)
 	a.DiscordSession.AddHandler(onApplicationCommand)

@@ -131,119 +131,193 @@ func (a *App) onReportAction(s *discordgo.Session, i *discordgo.InteractionCreat
 	if i.Type != discordgo.InteractionMessageComponent {
 		return
 	}
-
-	customID := i.MessageComponentData().CustomID
-	if !(strings.HasPrefix(customID, "report_resolve_") || strings.HasPrefix(customID, "report_dismiss_")) {
+	data := i.MessageComponentData()
+	cid := data.CustomID
+	if !(strings.HasPrefix(cid, "report_resolve_") || strings.HasPrefix(cid, "report_dismiss_")) {
 		return
 	}
 
-	// Parse CustomID format: "report_resolve_<reported>|<reporter>"
-	action := "resolved"
-	color := 0x22C55E // green
-	if strings.HasPrefix(customID, "report_resolve_") {
-		customID = strings.TrimPrefix(customID, "report_resolve_")
+	action := "resolve"
+	if strings.HasPrefix(cid, "report_resolve_") {
+		cid = strings.TrimPrefix(cid, "report_resolve_")
 	} else {
-		customID = strings.TrimPrefix(customID, "report_dismiss_")
-		action = "dismissed"
-		color = 0xEF4444 // red
+		cid = strings.TrimPrefix(cid, "report_dismiss_")
+		action = "dismiss"
 	}
 
-	parts := strings.SplitN(customID, "|", 2)
+	// Parse "<reported>|<reporter>"
+	parts := strings.SplitN(cid, "|", 2)
 	reported := ""
 	reporter := ""
 	if len(parts) == 2 {
-		reported = parts[0]
-		reporter = parts[1]
+		reported, reporter = parts[0], parts[1]
 	}
 
-	resolverID := i.Member.User.ID
-	now := time.Now().UTC().Format(time.RFC3339)
+	// We must remember which message to edit after the modal submit:
+	channelID := i.ChannelID
+	messageID := i.Message.ID
 
-	// Safely copy the first embed (the one we sent)
-	var newEmbed *discordgo.MessageEmbed
-	if len(i.Message.Embeds) > 0 {
-		orig := i.Message.Embeds[0]
-		// shallow copy is fine for our usage
-		cp := *orig
-		cp.Color = color
+	modalCustomID := fmt.Sprintf("report_action_modal|%s|%s|%s|%s|%s",
+		action, channelID, messageID, reported, reporter)
 
-		// Append/replace a "Status" field
-		statusValue := fmt.Sprintf("**%s** by <@%s> at %s", strings.Title(action), resolverID, time.Now().Format("2006-01-02 15:04 MST"))
-		// Try to find existing Status field to replace
-		updated := false
-		for _, f := range cp.Fields {
-			if strings.EqualFold(f.Name, "Status") {
-				f.Value = statusValue
-				updated = true
-				break
-			}
-		}
-		if !updated {
-			cp.Fields = append(cp.Fields, &discordgo.MessageEmbedField{
-				Name:  "Status",
-				Value: statusValue,
-			})
-		}
-
-		// Optional: update footer/timestamp to reflect action time
-		cp.Footer = &discordgo.MessageEmbedFooter{Text: "Rotaria Moderation"}
-		cp.Timestamp = now
-
-		newEmbed = &cp
-	} else {
-		// Fallback: build a simple embed if original missing
-		newEmbed = &discordgo.MessageEmbed{
-			Title:       "Report",
-			Description: "Status updated.",
-			Color:       color,
-			Fields: []*discordgo.MessageEmbedField{
-				{Name: "Status", Value: fmt.Sprintf("**%s** by <@%s>", strings.Title(action), resolverID)},
-			},
-			Timestamp: now,
-		}
-	}
-
-	// Remove buttons by sending an Update response with empty Components
-	err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-		Type: discordgo.InteractionResponseUpdateMessage,
+	_ = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseModal,
 		Data: &discordgo.InteractionResponseData{
-			Embeds:     []*discordgo.MessageEmbed{newEmbed},
-			Components: []discordgo.MessageComponent{}, // removes buttons
+			CustomID: modalCustomID,
+			Title:    strings.Title(action) + " Report",
+			Components: []discordgo.MessageComponent{
+				discordgo.ActionsRow{
+					Components: []discordgo.MessageComponent{
+						discordgo.TextInput{
+							CustomID:    "moderator_note",
+							Label:       "Add a short note for the record",
+							Style:       discordgo.TextInputParagraph,
+							Placeholder: "What did you find/decide? Any guidance for the players?",
+							Required:    true, // make note required
+							MaxLength:   1000,
+						},
+					},
+				},
+			},
 		},
 	})
-	if err != nil {
-		log.Printf("Failed to update report message: %v", err)
+}
+
+func (a *App) onReportActionModalSubmitted(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	if i.Type != discordgo.InteractionModalSubmit {
+		return
+	}
+	cid := i.ModalSubmitData().CustomID
+	if !strings.HasPrefix(cid, "report_action_modal|") {
 		return
 	}
 
-	// Post a follow-up message beneath the embed (normal channel send)
-	msgTxt := ""
-	if reported != "" {
-		msgTxt = fmt.Sprintf("📝 Report on `%s` was **%s** by <@%s>.", reported, strings.Title(action), resolverID)
+	// Parse: report_action_modal|<action>|<channelID>|<messageID>|<reported>|<reporter>
+	parts := strings.SplitN(cid, "|", 6)
+	if len(parts) != 6 {
+		return
+	}
+	action := parts[1] // "resolve" or "dismiss"
+	channelID := parts[2]
+	messageID := parts[3]
+	reported := parts[4]
+	reporter := parts[5]
+
+	// ✅ Use your existing helper to fetch the note from the modal
+	note := strings.TrimSpace(getModalInputValue(i, "moderator_note"))
+	// Optional: log to verify it’s actually present
+	log.Printf("Moderator note length: %d", len(note))
+
+	// Fetch original message
+	msg, err := s.ChannelMessage(channelID, messageID)
+	if err != nil {
+		_ = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Content: "❌ Could not fetch the original message to update.",
+				Flags:   discordgo.MessageFlagsEphemeral,
+			},
+		})
+		return
+	}
+
+	color := 0x22C55E
+	label := "Resolved"
+	if action == "dismiss" {
+		color = 0xEF4444
+		label = "Dismissed"
+	}
+	staffer := i.Member.User
+
+	statusLine := fmt.Sprintf(
+		"📝 Report on `%s` was **%s** by <@%s>. (Original reporter: <@%s>)",
+		reported, label, staffer.ID, reporter,
+	)
+
+	var edited *discordgo.MessageEmbed
+	if len(msg.Embeds) > 0 {
+		cp := *msg.Embeds[0]
+		cp.Color = color
+
+		// Append status line to description
+		if strings.TrimSpace(cp.Description) == "" {
+			cp.Description = statusLine
+		} else {
+			cp.Description += "\n\n" + statusLine
+		}
+
+		// 🔧 Always add/update "Moderator Note"
+		found := false
+		for _, f := range cp.Fields {
+			if strings.EqualFold(f.Name, "Moderator Note") {
+				// Update existing field
+				if note == "" {
+					f.Value = "—"
+				} else {
+					f.Value = note
+				}
+				found = true
+				break
+			}
+		}
+		if !found {
+			value := note
+			if value == "" {
+				value = "—" // visible placeholder so you know the field was set
+			}
+			cp.Fields = append(cp.Fields, &discordgo.MessageEmbedField{
+				Name:  "Moderator Note",
+				Value: value,
+			})
+		}
+
+		cp.Footer = &discordgo.MessageEmbedFooter{Text: "Rotaria Moderation"}
+		cp.Timestamp = time.Now().UTC().Format(time.RFC3339)
+		edited = &cp
 	} else {
-		msgTxt = fmt.Sprintf("📝 Report was **%s** by <@%s>.", strings.Title(action), resolverID)
-	}
-	if reporter != "" {
-		msgTxt += fmt.Sprintf(" (Original reporter: <@%s>)", reporter)
-	}
-
-	if _, err := s.ChannelMessageSend(i.ChannelID, msgTxt); err != nil {
-		log.Printf("Failed to send follow-up status message: %v", err)
-	}
-
-	// Optional: DM the original reporter with outcome
-	if reporter != "" {
-		if dm, derr := s.UserChannelCreate(reporter); derr == nil {
-			_, _ = s.ChannelMessageSend(dm.ID, fmt.Sprintf(
-				"Hi! Your report%s has been %s by our staff. Thanks for helping keep Rotaria safe!",
-				func() string {
-					if reported == "" {
-						return ""
-					}
-					return " on `" + reported + "`"
-				}(),
-				strings.Title(action),
-			))
+		edited = &discordgo.MessageEmbed{
+			Title:       "Report",
+			Color:       color,
+			Description: statusLine,
+			Fields: []*discordgo.MessageEmbedField{
+				{Name: "Moderator Note", Value: ifEmpty(note, "—")},
+			},
+			Footer:    &discordgo.MessageEmbedFooter{Text: "Rotaria Moderation"},
+			Timestamp: time.Now().UTC().Format(time.RFC3339),
 		}
 	}
+
+	// Apply edit + remove buttons
+	_, err = s.ChannelMessageEditComplex(&discordgo.MessageEdit{
+		Channel:    channelID,
+		ID:         messageID,
+		Embeds:     &[]*discordgo.MessageEmbed{edited},
+		Components: &[]discordgo.MessageComponent{},
+	})
+	if err != nil {
+		_ = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Content: "❌ Failed to update the report message.",
+				Flags:   discordgo.MessageFlagsEphemeral,
+			},
+		})
+		return
+	}
+
+	_ = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Content: fmt.Sprintf("✅ %s with note added.", label),
+			Flags:   discordgo.MessageFlagsEphemeral,
+		},
+	})
+}
+
+// tiny helper
+func ifEmpty(s, fallback string) string {
+	if strings.TrimSpace(s) == "" {
+		return fallback
+	}
+	return s
 }
