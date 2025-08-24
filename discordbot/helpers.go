@@ -27,3 +27,5 @@ func getSubmittingUser(i *discordgo.InteractionCreate) *discordgo.User {
 	}
 	return nil
 }
+
+func intPtr(v int) *int { return &v }
