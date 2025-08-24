@@ -8,6 +8,7 @@ import (
 	"limpan/rotaria-bot/namemc"
 	"log"
 	"strings"
+	"time"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/joho/godotenv"
@@ -84,13 +85,25 @@ func showWhitelistModal(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	s.InteractionRespond(i.Interaction, modal)
 }
 
-func (a *App) sendWLForReview(s *discordgo.Session, mcUsername, discordId, age string) {
-	err := godotenv.Load()
-	if err != nil {
+// add plan parameter
+func (a *App) sendWLForReview(s *discordgo.Session, mcUsername, discordId, age, plan string) {
+	if err := godotenv.Load(); err != nil {
 		log.Fatal("Error loading .env file")
 	}
 
-	content := fmt.Sprintf("📝 Whitelist request from **<@%s>** for Minecraft username: `%s` and age: %s", discordId, mcUsername, age)
+	embed := &discordgo.MessageEmbed{
+		Title:       "Whitelist Request",
+		Description: "A new whitelist request has been submitted.",
+		Color:       0x3B82F6, // blue
+		Fields: []*discordgo.MessageEmbedField{
+			{Name: "Applicant", Value: fmt.Sprintf("<@%s>", discordId), Inline: true},
+			{Name: "Minecraft Username", Value: fmt.Sprintf("`%s`", mcUsername), Inline: true},
+			{Name: "Age", Value: age, Inline: true},
+			{Name: "Plan on the Server", Value: plan, Inline: false}, // 👈 shows the modal text
+		},
+		Footer:    &discordgo.MessageEmbedFooter{Text: "Rotaria Whitelist"},
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+	}
 
 	components := []discordgo.MessageComponent{
 		discordgo.ActionsRow{
@@ -109,8 +122,8 @@ func (a *App) sendWLForReview(s *discordgo.Session, mcUsername, discordId, age s
 		},
 	}
 
-	_, err = s.ChannelMessageSendComplex(a.Config.WhitelistRequestsChannelID, &discordgo.MessageSend{
-		Content:    content,
+	_, err := s.ChannelMessageSendComplex(a.Config.WhitelistRequestsChannelID, &discordgo.MessageSend{
+		Embeds:     []*discordgo.MessageEmbed{embed},
 		Components: components,
 	})
 	if err != nil {
@@ -130,14 +143,12 @@ func (a *App) onWhitelistModalSubmitted(s *discordgo.Session, i *discordgo.Inter
 
 		minecraftUsername := getModalInputValue(i, "mc_username")
 		age := getModalInputValue(i, "age")
+		plan := getModalInputValue(i, "info_1") // 👈 NEW
 
 		namemcClient := namemc.New()
-
 		uuid, err := namemcClient.UsernameToUUID(minecraftUsername)
-
 		if err != nil {
 			log.Printf("Error getting UUID for Minecraft username %s: %v", minecraftUsername, err)
-			// please respond to user in discord
 			s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 				Type: discordgo.InteractionResponseChannelMessageWithSource,
 				Data: &discordgo.InteractionResponseData{
@@ -150,7 +161,8 @@ func (a *App) onWhitelistModalSubmitted(s *discordgo.Session, i *discordgo.Inter
 
 		log.Printf("UUID for Minecraft username %s: %s", minecraftUsername, uuid)
 
-		a.sendWLForReview(s, minecraftUsername, submittingUser.ID, age)
+		// 👇 pass plan to review embed
+		a.sendWLForReview(s, minecraftUsername, submittingUser.ID, age, plan)
 
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
@@ -167,11 +179,74 @@ func (a *App) onWhitelistModalResponse(s *discordgo.Session, i *discordgo.Intera
 		return
 	}
 
-	interactionMadeBy := i.Member.User.ID
-
+	staffID := i.Member.User.ID
 	customID := i.MessageComponentData().CustomID
 
-	if strings.HasPrefix(customID, "approve_") {
+	// helper to update the embed in-place
+	updateEmbed := func(approved bool, username, requester string) {
+		color := 0x22C55E // green
+		label := "approved"
+		if !approved {
+			color = 0xEF4444 // red
+			label = "rejected"
+		}
+
+		// clone the first embed so we keep all fields (including the Plan)
+		var edited *discordgo.MessageEmbed
+		if len(i.Message.Embeds) > 0 {
+			cp := *i.Message.Embeds[0]
+			cp.Color = color
+
+			// Append a status line to description (keeps Plan field intact)
+			status := fmt.Sprintf("📝 Request for `%s` was **%s** by <@%s>. (Requested by: <@%s>)",
+				username, strings.Title(label), staffID, requester)
+			if strings.TrimSpace(cp.Description) == "" {
+				cp.Description = status
+			} else {
+				cp.Description = cp.Description + "\n\n" + status
+			}
+
+			// Optional: add/update a "Decision" field
+			found := false
+			for _, f := range cp.Fields {
+				if strings.EqualFold(f.Name, "Decision") {
+					f.Value = strings.Title(label)
+					found = true
+					break
+				}
+			}
+			if !found {
+				cp.Fields = append(cp.Fields, &discordgo.MessageEmbedField{
+					Name:   "Decision",
+					Value:  strings.Title(label),
+					Inline: false,
+				})
+			}
+
+			cp.Footer = &discordgo.MessageEmbedFooter{Text: "Rotaria Whitelist"}
+			cp.Timestamp = time.Now().UTC().Format(time.RFC3339)
+			edited = &cp
+		} else {
+			// Fallback (shouldn't happen in this flow)
+			edited = &discordgo.MessageEmbed{
+				Title:       "Whitelist Request",
+				Description: fmt.Sprintf("Request for `%s` was %s by <@%s>.", username, label, staffID),
+				Color:       color,
+			}
+		}
+
+		// Update original message: replace embed, remove buttons
+		_ = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseUpdateMessage,
+			Data: &discordgo.InteractionResponseData{
+				Embeds:     []*discordgo.MessageEmbed{edited},
+				Components: []discordgo.MessageComponent{},
+			},
+		})
+	}
+
+	switch {
+	case strings.HasPrefix(customID, "approve_"):
 		data := strings.TrimPrefix(customID, "approve_")
 		parts := strings.SplitN(data, "|", 2)
 		if len(parts) != 2 {
@@ -180,51 +255,46 @@ func (a *App) onWhitelistModalResponse(s *discordgo.Session, i *discordgo.Intera
 		}
 		username := parts[0]
 		requester := parts[1]
+
 		a.addWhitelist(requester, username)
 
-		msg := fmt.Sprintf("whitelist add %s\n", username)
+		// tell the MC mod (already in your code)
 		ctx := context.Background()
-		_, err := a.MinecraftConn.Send(ctx, []byte(msg))
-		if err != nil {
-			log.Printf("Error sending to Minecraft mod: %v", err)
-		}
-
-		err = s.GuildMemberRoleAdd(a.Config.GuildID, requester, a.Config.MemberRoleID)
-		if err != nil {
-			log.Printf("Failed to assign role to %s: %v", requester, err)
-		}
-
-		dm, err := s.UserChannelCreate(requester)
-		if err != nil {
-			log.Printf("Failed to create DM channel for %s: %v", requester, err)
-		} else {
-			_, err = s.ChannelMessageSend(dm.ID, fmt.Sprintf(
-				"✅ You have been whitelisted on Rotaria!\nWelcome, `%s` 🎉",
-				username,
-			))
-			if err != nil {
-				log.Printf("Failed to send DM to %s: %v", requester, err)
+		if a.MinecraftConn != nil {
+			if _, err := a.MinecraftConn.Send(ctx, []byte(fmt.Sprintf("whitelist add %s\n", username))); err != nil {
+				log.Printf("Error sending to Minecraft mod: %v", err)
 			}
 		}
 
-		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-			Type: discordgo.InteractionResponseUpdateMessage,
-			Data: &discordgo.InteractionResponseData{
-				Content:    fmt.Sprintf("✅ <@%s> approved `%s` for whitelisting! (Requested by: <@%s>)", interactionMadeBy, username, requester),
-				Components: []discordgo.MessageComponent{},
-			},
-		})
-	} else if strings.HasPrefix(customID, "reject_") {
-		username := strings.TrimPrefix(customID, "reject_")
+		// role assignment (already in your code)
+		if err := s.GuildMemberRoleAdd(a.Config.GuildID, requester, a.Config.MemberRoleID); err != nil {
+			log.Printf("Failed to assign role to %s: %v", requester, err)
+		}
 
-		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-			Type: discordgo.InteractionResponseUpdateMessage,
-			Data: &discordgo.InteractionResponseData{
-				Content:    fmt.Sprintf("❌ <@%s> rejected `%s` from whitelisting.", interactionMadeBy, username),
-				Components: []discordgo.MessageComponent{},
-			},
-		})
-	} else {
+		// ✅ EDIT the embed, keeping the Plan field visible
+		updateEmbed(true, username, requester)
+
+		// Optional: DM the user (include their plan if you want)
+		if dm, err := s.UserChannelCreate(requester); err == nil {
+			_, _ = s.ChannelMessageSend(dm.ID, fmt.Sprintf(
+				"✅ You have been whitelisted on Rotaria!\nWelcome, `%s` 🎉",
+				username,
+			))
+		}
+
+	case strings.HasPrefix(customID, "reject_"):
+		data := strings.TrimPrefix(customID, "reject_")
+		parts := strings.SplitN(data, "|", 2)
+		if len(parts) != 2 {
+			log.Println("Invalid reject_ customID format")
+			return
+		}
+		username := parts[0]
+		requester := parts[1]
+
+		updateEmbed(false, username, requester)
+
+	default:
 		log.Printf("Unknown customID: %s", customID)
 	}
 }
