@@ -20,6 +20,10 @@ func initCommands(a *App) []*discordgo.ApplicationCommand {
 			Name:        "list",
 			Description: "List all current online players",
 		},
+		{
+			Name:        "report",
+			Description: "Report an issue on the server",
+		},
 	}
 
 	commandHandlers = map[string]func(s *discordgo.Session, i *discordgo.InteractionCreate){
@@ -61,6 +65,9 @@ func initCommands(a *App) []*discordgo.ApplicationCommand {
 					Flags:  discordgo.MessageFlagsEphemeral,
 				},
 			})
+		},
+		"report": func(s *discordgo.Session, i *discordgo.InteractionCreate) {
+
 		},
 	}
 	return commands
