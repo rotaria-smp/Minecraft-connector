@@ -20,6 +20,10 @@ func initCommands(a *App) []*discordgo.ApplicationCommand {
 			Name:        "list",
 			Description: "List all current online players",
 		},
+		{
+			Name:        "report",
+			Description: "Report an issue on the server",
+		},
 	}
 
 	commandHandlers = map[string]func(s *discordgo.Session, i *discordgo.InteractionCreate){
@@ -59,6 +63,82 @@ func initCommands(a *App) []*discordgo.ApplicationCommand {
 				Data: &discordgo.InteractionResponseData{
 					Embeds: []*discordgo.MessageEmbed{&embed},
 					Flags:  discordgo.MessageFlagsEphemeral,
+				},
+			})
+		},
+		"report": func(s *discordgo.Session, i *discordgo.InteractionCreate) {
+			_ = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+				Type: discordgo.InteractionResponseModal,
+				Data: &discordgo.InteractionResponseData{
+					CustomID: "report_modal",
+					Title:    "Report an Issue",
+					Components: []discordgo.MessageComponent{
+						// Report Type (player, bug, other)
+						discordgo.ActionsRow{
+							Components: []discordgo.MessageComponent{
+								discordgo.TextInput{
+									CustomID:    "report_type",
+									Label:       "Report Type (player, bug, other)",
+									Style:       discordgo.TextInputShort,
+									Placeholder: "player | bug | other",
+									Required:    true,
+									MaxLength:   16,
+								},
+							},
+						},
+						// Reported player (optional unless type=player)
+						discordgo.ActionsRow{
+							Components: []discordgo.MessageComponent{
+								discordgo.TextInput{
+									CustomID:    "reported_username",
+									Label:       "Player username (only if type = player)",
+									Style:       discordgo.TextInputShort,
+									Placeholder: "e.g. Griefer123",
+									Required:    false,
+									MaxLength:   64,
+								},
+							},
+						},
+						// Reason / details
+						discordgo.ActionsRow{
+							Components: []discordgo.MessageComponent{
+								discordgo.TextInput{
+									CustomID:    "report_reason",
+									Label:       "What happened?",
+									Style:       discordgo.TextInputParagraph,
+									Placeholder: "Describe the incident, bug, or issue.",
+									Required:    true,
+									MaxLength:   1000,
+								},
+							},
+						},
+						// Evidence links (optional)
+						discordgo.ActionsRow{
+							Components: []discordgo.MessageComponent{
+								discordgo.TextInput{
+									CustomID:    "report_evidence",
+									Label:       "Evidence (links, optional)",
+									Style:       discordgo.TextInputShort,
+									Placeholder: "e.g. screenshot/video links",
+									Required:    false,
+									MaxLength:   200,
+								},
+							},
+						},
+						// Context (optional)
+						discordgo.ActionsRow{
+							Components: []discordgo.MessageComponent{
+								discordgo.TextInput{
+									CustomID:    "report_context",
+									Label:       "Where/when? (optional)",
+									Style:       discordgo.TextInputShort,
+									Placeholder: "Area, coordinates, time, etc.",
+									Required:    false,
+									MaxLength:   200,
+								},
+							},
+						},
+					},
 				},
 			})
 		},

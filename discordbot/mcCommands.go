@@ -167,6 +167,8 @@ func (a *App) onWhitelistModalResponse(s *discordgo.Session, i *discordgo.Intera
 		return
 	}
 
+	interactionMadeBy := i.Member.User.ID
+
 	customID := i.MessageComponentData().CustomID
 
 	if strings.HasPrefix(customID, "approve_") {
@@ -208,7 +210,7 @@ func (a *App) onWhitelistModalResponse(s *discordgo.Session, i *discordgo.Intera
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseUpdateMessage,
 			Data: &discordgo.InteractionResponseData{
-				Content:    fmt.Sprintf("✅ Approved `%s` for whitelisting! (Requested by: <@%s>)", username, requester),
+				Content:    fmt.Sprintf("✅ <@%s> approved `%s` for whitelisting! (Requested by: <@%s>)", interactionMadeBy, username, requester),
 				Components: []discordgo.MessageComponent{},
 			},
 		})
@@ -218,7 +220,7 @@ func (a *App) onWhitelistModalResponse(s *discordgo.Session, i *discordgo.Intera
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseUpdateMessage,
 			Data: &discordgo.InteractionResponseData{
-				Content:    fmt.Sprintf("❌ Rejected `%s` from whitelisting.", username),
+				Content:    fmt.Sprintf("❌ <@%s> rejected `%s` from whitelisting.", interactionMadeBy, username),
 				Components: []discordgo.MessageComponent{},
 			},
 		})

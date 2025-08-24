@@ -18,6 +18,7 @@ type Config struct {
 	DiscordToken                       string
 	MinecraftAddress                   string
 	WhitelistRequestsChannelID         string
+	ReportChannelID                    string
 	MinecraftDiscordMessengerChannelID string
 	ServerStatusChannelID              string
 	DatabaseConfigPath                 string
@@ -97,6 +98,7 @@ func (a *App) loadConfig() error {
 		DiscordToken:                       os.Getenv("DiscordToken"),
 		MinecraftDiscordMessengerChannelID: os.Getenv("MinecraftDiscordMessengerChannelID"),
 		WhitelistRequestsChannelID:         os.Getenv("WhitelistRequestsChannelID"),
+		ReportChannelID:                    os.Getenv("ReportChannelID"),
 		ServerStatusChannelID:              os.Getenv("ServerStatusChannelID"),
 		MinecraftAddress:                   os.Getenv("MinecraftAddress"),
 		DatabaseConfigPath:                 os.Getenv("DatabaseConfigPath"),
@@ -156,6 +158,9 @@ func (a *App) setupDiscordHandlers() {
 	a.DiscordSession.AddHandler(a.onDiscordMessage)
 	a.DiscordSession.AddHandler(a.onWhitelistModalSubmitted)
 	a.DiscordSession.AddHandler(a.onWhitelistModalResponse)
+	a.DiscordSession.AddHandler(a.onReportModalSubmitted)
+	a.DiscordSession.AddHandler(a.onReportAction)
+	a.DiscordSession.AddHandler(a.onReportActionModalSubmitted)
 	a.DiscordSession.AddHandler(a.onUserLeft)
 	a.DiscordSession.AddHandler(onWhitelistModalRequested)
 	a.DiscordSession.AddHandler(onApplicationCommand)
