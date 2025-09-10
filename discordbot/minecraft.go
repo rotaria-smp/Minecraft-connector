@@ -110,12 +110,13 @@ func (a *App) readMinecraftMessages() {
 
 		// Everything else goes to chat
 		var msg string
-		username := ""
+		var fullUsername string
+		var username string
 		content := body
 
 		if evt.Topic == entities.TopicChat && strings.HasPrefix(body, "<") {
+			fullUsername, username = extractUsernames(body)
 			if endIdx := strings.Index(body, ">"); endIdx != -1 {
-				username = body[1:endIdx] // cleaned Minecraft username
 				content = strings.TrimSpace(body[endIdx+1:])
 			}
 		}
@@ -136,7 +137,7 @@ func (a *App) readMinecraftMessages() {
 
 		message := discordwebhook.Message{
 			Content:   &msg,
-			Username:  &username,
+			Username:  &fullUsername,
 			AvatarURL: &avatar,
 			Flags:     &flag,
 		}
