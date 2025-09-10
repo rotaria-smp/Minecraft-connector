@@ -24,6 +24,7 @@ type Config struct {
 	DatabaseConfigPath                 string
 	MemberRoleID                       string
 	GuildID                            string
+	MessageWebhookUrl                  string
 }
 
 type App struct {
@@ -104,6 +105,7 @@ func (a *App) loadConfig() error {
 		DatabaseConfigPath:                 os.Getenv("DatabaseConfigPath"),
 		MemberRoleID:                       os.Getenv("MemberRoleID"),
 		GuildID:                            os.Getenv("GuildID"),
+		MessageWebhookUrl:                  os.Getenv("MessageWebhookUrl"),
 	}
 
 	if a.Config.DiscordToken == "" {

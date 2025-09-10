@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/bwmarrin/discordgo"
+	"github.com/rotaria-smp/discordwebhook"
 )
 
 func loadBlacklist(path string) ([]string, error) {
@@ -50,7 +51,7 @@ func (a *App) readMinecraftMessages() {
 	defer cancel()
 
 	// Chat sender (unchanged, still ~1 msg/sec)
-	out := make(chan string, 4096)
+	out := make(chan discordwebhook.Message, 4096)
 	go func() {
 		tokens := make(chan struct{}, 5)
 		for i := 0; i < cap(tokens); i++ {
@@ -65,12 +66,12 @@ func (a *App) readMinecraftMessages() {
 				case tokens <- struct{}{}:
 				default:
 				}
-			case m, ok := <-out:
+			case msg, ok := <-out:
 				if !ok {
 					return
 				}
 				<-tokens
-				if _, err := a.DiscordSession.ChannelMessageSend(a.Config.MinecraftDiscordMessengerChannelID, m); err != nil {
+				if err := discordwebhook.SendMessage(a.Config.MessageWebhookUrl, msg); err != nil {
 					log.Printf("Error sending message to Discord: %v", err)
 				}
 			}
@@ -114,7 +115,7 @@ func (a *App) readMinecraftMessages() {
 
 		if evt.Topic == entities.TopicChat && strings.HasPrefix(body, "<") {
 			if endIdx := strings.Index(body, ">"); endIdx != -1 {
-				username = body[1:endIdx]          // cleaned Minecraft username
+				username = body[1:endIdx] // cleaned Minecraft username
 				content = strings.TrimSpace(body[endIdx+1:])
 			}
 		}
@@ -123,25 +124,29 @@ func (a *App) readMinecraftMessages() {
 
 		if msg != "" && a.isBlacklisted(msg) {
 			log.Printf("Blocked blacklisted message from %s: %q", username, msg)
-			a.kickPlayer(username) 
+			a.kickPlayer(username)
 			continue
 		}
 
-		// Reconstruct message for Discord
-		fullMsg := msg
-		if username != "" {
-			fullMsg = fmt.Sprintf("<%s> %s", username, msg)
+		avatar := fmt.Sprintf("https://minotar.net/avatar/%s/128.png", username)
+		flag := discordwebhook.MessageFlagSuppressNotifications
+
+		message := discordwebhook.Message{
+			Content:   &msg,
+			Username:  &username,
+			AvatarURL: &avatar,
+			Flags:     &flag,
 		}
 
-		if strings.Contains(fullMsg, "@") {
-			log.Printf("Blocked blacklisted message from %s: %q", username, fullMsg)
+		if strings.Contains(*message.Content, "@") {
+			log.Printf("Blocked blacklisted message from %s: %q", username, *message.Content)
 
-			fullMsg = ""
+			*message.Content = ""
 		}
 
-		if fullMsg != "" {
+		if *message.Content != "" {
 			select {
-			case out <- fullMsg:
+			case out <- message:
 			default:
 				log.Printf("chat queue full; dropping message")
 			}
