@@ -131,11 +131,19 @@ func (a *App) readMinecraftMessages() {
 		avatar := fmt.Sprintf("https://minotar.net/avatar/%s/128.png", username)
 		flag := discordwebhook.MessageFlagSuppressNotifications
 
+		genericEventUsername := "Rotaria"
+		rotariaAvatar := "https://cdn.discordapp.com/icons/1373389493218050150/24f94fe60c73b4af4956f10dbecb5919.webp"
+
 		message := discordwebhook.Message{
 			Content:   &msg,
 			Username:  &username,
 			AvatarURL: &avatar,
 			Flags:     &flag,
+		}
+		switch evt.Topic {
+		case entities.TopicJoin, entities.TopicLeave, entities.TopicLifecycle:
+			message.Username = &genericEventUsername
+			message.AvatarURL = &rotariaAvatar
 		}
 
 		if strings.Contains(*message.Content, "@") {
